@@ -7,6 +7,9 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ansi -pedantic -Wall -Wextra")
 
 set(SOURCE_FILES
     src/readElf.c
+    src/loader.h
+    src/loader_private.h
+    src/loader.c
 )
 
 add_executable(read_elf ${SOURCE_FILES})

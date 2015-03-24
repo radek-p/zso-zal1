@@ -35,7 +35,7 @@ int readElfFile(const char* path)
 	if (fread((void *)elfFile_buffer, 1, elfFile_size, elfFile_handle) != elfFile_size)
 		goto _FreadFailed;
 
-	/* Check whether we have 32 or 64bit file */
+	/* Check whether this is 32 or 64bit file */
 	if (elfFile_size <= EI_CLASS)
 		goto _ElfTooShort;
 
@@ -79,6 +79,7 @@ void printElfHeader32(Elf32_Ehdr* header)
 void printElfHeader64(Elf64_Ehdr* header)
 {
 	printf("Elf:\n\ttype:\t%d\n", header->e_type);
+	printf("64-bit elf files are not supported. Sorry.");
 }
 
 int main(int argc, char const *argv[]) {
