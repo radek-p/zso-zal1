@@ -1,6 +1,7 @@
-#include <libzvbi.h>
 #include "loader.h"
 #include "loader_private.h"
+
+#include <stdlib.h>
 
 /* Struct describing handle for a dynamic library */
 struct library {
