@@ -6,7 +6,7 @@
 #define LOG(M)\
     fprintf(stderr, "[LOG] %d:\t" M "\n", __LINE__)
 #define LOGM(M, ...)\
-    fprintf(stderr, "[LOG] %s:%d:\t" M "\n", __FILE__, __LINE__, ##__VA_ARGS__)
+    fprintf(stderr, "[LOG] %d:\t" M "\n", __LINE__, ##__VA_ARGS__)
 #else
 #define LOG(M, ...)
 #define LOGM(M, ...)

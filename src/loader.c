@@ -11,9 +11,9 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	struct library *ret = NULL;
 	Elf32_Ehdr *elfHeader = NULL;
 	Elf32_Phdr *elfSegmentTable = NULL;
-	size_t elfSize;
+	Elf32_Off elfSize;
 	int res;
-	unsigned int i;
+	Elf32_Half i;
 
 	elfHandle = fopen(name, "r");
 	WHEN(elfHandle == NULL, _ElfOpenFailed_, "Failed to open ELF file.");
@@ -28,15 +28,22 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	res = readSegmentTable(elfHandle, elfSize, elfHeader, &elfSegmentTable);
 	WHEN(res != 0, _ElfReadFailed_, "invalid ELF segment table");
 
+	LOGM("%zu", (size_t)elfHeader);
+	LOGM("E phnum: %zu", elfHeader->e_phnum);
+
+
 	for (i = 0; i < elfHeader->e_phnum; ++i) {
-		switch (elfSegmentTable[i].p_type) {
+//		LOGM("&elfSegmentTable[%zu] = %zu", i, (size_t)&elfSegmentTable[i]);
+//		LOGM("type: %zu", elfSegmentTable[i].p_type);
+		switch ((elfSegmentTable + i)->p_type) {
 			case PT_LOAD:
-				LOGM("#%d -> PT_LOAD segment", i);
+				LOGM("#%d -> PT_LOAD", i);
 				break;
 			case PT_DYNAMIC:
-				LOGM("#%d -> PT_DYNAMIC segment", i);
+				LOGM("#%d -> PT_DYNAMIC", i);
+				break;
 			default:
-				LOGM("#%d -> unknown type segment", i);
+				LOGM("#%d -> %zu", i, elfSegmentTable[i].p_type);
 		}
 	}
 
@@ -66,7 +73,7 @@ void *library_getsym(struct library *lib, const char *name) {
 	return NULL;
 }
 
-int fileSize(FILE *handle, size_t *size) {
+int fileSize(FILE *handle, Elf32_Off *size) {
 	int res;
 	int ret;
 	long tmpSize;
@@ -79,7 +86,9 @@ int fileSize(FILE *handle, size_t *size) {
 	tmpSize = ftell(handle);
 	WHEN(tmpSize < 0, _Fail_, "ftell failed");
 
-	*size = (size_t) tmpSize;
+	rewind(handle);
+
+	*size = (Elf32_Off) tmpSize;
 	ret = 0;
 
 	_Fail_:
@@ -94,7 +103,7 @@ int isHeaderValid(Elf32_Ehdr *header) {
 	for (i = 0; i < SELFMAG; ++i)
 		WHEN(((unsigned char *) header)[i] != ELFMAG[i], _Fail_, "Invalid magic number");
 
-	WHEN(((char *)header)[EI_CLASS] != EI_CLASS, _Fail_, "This is not a 32-bit ELF file");
+	WHEN(((char *)header)[EI_CLASS] != ELFCLASS32, _Fail_, "This is not a 32-bit ELF file");
 
 	/*TODO More checks*/
 
@@ -116,49 +125,52 @@ int readHeader(FILE *elfHandle, size_t elfSize, Elf32_Ehdr **elfHeader) {
 	tmpElfHeader = malloc(sizeof(Elf32_Ehdr));
 	WHEN(tmpElfHeader == NULL, _Fail_, "malloc failed");
 
-	LOGM("elfHandleAdress: %d", elfHandle);
-	bytesRead = fread(tmpElfHeader, sizeof(Elf32_Ehdr), 1, elfHandle);
-	LOGM("bytes read: %zu", bytesRead);
-	WHEN(bytesRead != sizeof(Elf32_Ehdr), _Fail_, "cannot read elf header");
+	bytesRead = fread(tmpElfHeader, 1, sizeof(Elf32_Ehdr), elfHandle);
+	LOGM(" bytes read: %zu", bytesRead);
+	LOGM("header size: %zu", sizeof(Elf32_Ehdr));
+	WHEN(bytesRead != sizeof(Elf32_Ehdr), _Fail_, "fread failed");
 
-	WHEN(isHeaderValid(tmpElfHeader), _Fail_, "elf header is not valid");
+	WHEN(!isHeaderValid(tmpElfHeader), _Fail_, "elf header is not valid");
 
 	*elfHeader = tmpElfHeader;
 	ret = 0;
 
 	_Fail_:
-	free(tmpElfHeader);
+	if (ret != 0)
+		free(tmpElfHeader);
 
 	_InvalidSize_:
 	return ret;
 }
 
-int readSegmentTable(FILE *elfHandle, size_t elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable) {
-
-	int ret;
-	size_t bytesRead;
+int readSegmentTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable) {
+	size_t rowsRead;
 	Elf32_Phdr *tmpElfSegmentsTable;
 	Elf32_Off end;
 
-	ret = 1;
+	fseek(elfHandle, elfHeader->e_phoff, SEEK_SET);
+	/* TODO error handling */
+
 	/* All values are unsigned, should not overflow */
 	end = elfHeader->e_phoff + elfHeader->e_phnum * elfHeader->e_phentsize;
 
-	LOGM("check: %zu < %d", elfSize, end);
+	LOGM("elf size: %zu, program section: [%zu; %zu]", elfSize, elfHeader->e_phoff, end);
+	LOGM("phnum: %zu", elfHeader->e_phnum);
+	LOGM("%zu", (size_t)elfHeader);
 	WHEN(elfSize < end, _InvalidSize_, "ELF file too small");
 
-	tmpElfSegmentsTable = malloc(sizeof(Elf32_Ehdr));
+	tmpElfSegmentsTable = malloc(elfHeader->e_phentsize * elfHeader->e_phnum);
 	WHEN(tmpElfSegmentsTable == NULL, _Fail_, "malloc failed");
 
-	bytesRead = fread(tmpElfSegmentsTable, 1, sizeof(Elf32_Ehdr), elfHandle);
-	WHEN(bytesRead != sizeof(Elf32_Ehdr), _Fail_, "cannot read ELF segments table");
+	rowsRead = fread(tmpElfSegmentsTable, elfHeader->e_phentsize, elfHeader->e_phnum, elfHandle);
+	WHEN(rowsRead != elfHeader->e_phnum, _Fail_, "cannot read ELF segments table");
 
 	*elfSegmentsTable = tmpElfSegmentsTable;
-	ret = 0;
+
+	return 0;
 
 	_Fail_:
-	free(tmpElfSegmentsTable);
-
+		free(tmpElfSegmentsTable);
 	_InvalidSize_:
-	return ret;
+		return 1;
 }
