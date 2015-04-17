@@ -9,7 +9,6 @@ int main(int argc, char const *argv[])
 	WHEN(argc != 2, _InvalidArgs_, "Please provide a binary name");
 
 	struct library *lib = library_load(argv[1], NULL);
-
 	free(lib);
 
 	return 0;

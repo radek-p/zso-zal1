@@ -25,8 +25,8 @@ struct library {
 /* Elf32_Ehdr * mapElfFile(const char * name); */
 int fileSize(FILE *handle, Elf32_Off *size);
 
-int readHeader(FILE *elfHandle, size_t elfSize, Elf32_Ehdr **elfHeader);
+int readHeader(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr **elfHeader);
 
-int readSegmentTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable);
+int readProgramHeaderTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable);
 
 int isHeaderValid(Elf32_Ehdr *header);

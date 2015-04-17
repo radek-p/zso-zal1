@@ -10,10 +10,11 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	struct library *lib = NULL;
 	struct library *ret = NULL;
 	Elf32_Ehdr *elfHeader = NULL;
-	Elf32_Phdr *elfSegmentTable = NULL;
+	Elf32_Phdr *elfPHTable = NULL;
 	Elf32_Off elfSize;
-	int res;
 	Elf32_Half i;
+	Elf32_Addr minVAddr, maxVAddr;
+	int res;
 
 	elfHandle = fopen(name, "r");
 	WHEN(elfHandle == NULL, _ElfOpenFailed_, "Failed to open ELF file.");
@@ -23,29 +24,41 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	res = readHeader(elfHandle, elfSize, &elfHeader);
 	WHEN(res != 0, _ElfReadFailed_, "invalid ELF header");
+	WHEN(elfHeader->e_phnum <= 0, _ElfPHTableReadFailed_, "no entries in PH table");
 
 	/* TODO move this to separate procedure */
-	res = readSegmentTable(elfHandle, elfSize, elfHeader, &elfSegmentTable);
+	res = readProgramHeaderTable(elfHandle, elfSize, elfHeader, &elfPHTable);
 	WHEN(res != 0, _ElfReadFailed_, "invalid ELF segment table");
 
-	LOGM("%zu", (size_t)elfHeader);
-	LOGM("E phnum: %zu", elfHeader->e_phnum);
+	LOGM("There are %zu program headers:", elfHeader->e_phnum);
 
+	minVAddr = elfPHTable[0].p_vaddr;
+	maxVAddr = elfPHTable[0].p_vaddr + elfPHTable[0].p_memsz;
 
 	for (i = 0; i < elfHeader->e_phnum; ++i) {
-//		LOGM("&elfSegmentTable[%zu] = %zu", i, (size_t)&elfSegmentTable[i]);
-//		LOGM("type: %zu", elfSegmentTable[i].p_type);
-		switch ((elfSegmentTable + i)->p_type) {
+		/* TODO What about PT_DYNAMIC ? */
+		if (elfPHTable[i].p_type == PT_LOAD) {
+			if (elfPHTable[i].p_vaddr < minVAddr)
+				minVAddr = elfPHTable[i].p_vaddr;
+
+			if (elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz > maxVAddr)
+				maxVAddr = elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz;
+
+			LOGM("      [%zu, %zu] (size: %zu)", elfPHTable[i].p_vaddr, elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz, elfPHTable[i].p_memsz);
+		}
+		switch ((elfPHTable + i)->p_type) {
 			case PT_LOAD:
-				LOGM("#%d -> PT_LOAD", i);
+				LOGM("  #%d: PT_LOAD", i);
 				break;
 			case PT_DYNAMIC:
-				LOGM("#%d -> PT_DYNAMIC", i);
+				LOGM("  #%d: PT_DYNAMIC", i);
 				break;
 			default:
-				LOGM("#%d -> %zu", i, elfSegmentTable[i].p_type);
+				LOGM("  #%d: %zu", i, elfPHTable[i].p_type);
 		}
 	}
+
+	LOGM("map size: [%zu, %zu]", minVAddr, maxVAddr);
 
 	/* TODO */
 	/* Map ELF to memory */
@@ -54,7 +67,11 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	lib = malloc(sizeof(struct library));
 	lib->resolveSymbol = getsym;
 
+
 	ret = lib;
+	free(elfPHTable);
+
+	_ElfPHTableReadFailed_:
 	free(elfHeader);
 
 	_ElfReadFailed_:
@@ -73,47 +90,53 @@ void *library_getsym(struct library *lib, const char *name) {
 	return NULL;
 }
 
+/* Oblicza rozmiar pliku i wykonuje fseek na początek pliku.
+ * Przy braku błędów zwraca 0. */
 int fileSize(FILE *handle, Elf32_Off *size) {
 	int res;
-	int ret;
 	long tmpSize;
 
-	ret = 1;
-
-	res = fseek(handle, 0, SEEK_END);
-	WHEN(res != 0, _Fail_, "fseek failed");
+	res = fseek(handle, 0L, SEEK_END);
+	WHEN(res != 0, _Fail_, "fseek failed"); // OK
 
 	tmpSize = ftell(handle);
-	WHEN(tmpSize < 0, _Fail_, "ftell failed");
+	WHEN(tmpSize < 0, _Fail_, "ftell failed"); // OK
 
-	rewind(handle);
+	res = fseek(handle, 0L, SEEK_SET);
+	WHEN(res != 0, _Fail_, "fseek failed"); // OK
 
 	*size = (Elf32_Off) tmpSize;
-	ret = 0;
+	return 0;
 
 	_Fail_:
-	return ret;
+	return 1;
 }
 
+/* Sprawdza poprawność nagłówka pliku ELF
+ * Jeśli nagłówek jest poprawny, zwraca 1, wpp. 0 */
 int isHeaderValid(Elf32_Ehdr *header) {
-	int ret, i;
-
-	ret = 0;
+	int i;
 
 	for (i = 0; i < SELFMAG; ++i)
-		WHEN(((unsigned char *) header)[i] != ELFMAG[i], _Fail_, "Invalid magic number");
+		WHEN(header->e_ident[i] != ELFMAG[i], _Fail_, "wrong magic number");
 
-	WHEN(((char *)header)[EI_CLASS] != ELFCLASS32, _Fail_, "This is not a 32-bit ELF file");
+	WHEN(header->e_ident[EI_CLASS  ] != ELFCLASS32   , _Fail_, "unsupported architecture (not 32 bit)");
+	WHEN(header->e_ident[EI_OSABI  ] != ELFOSABI_SYSV, _Fail_, "unsupported operating system");
+	WHEN(header->e_ident[EI_DATA   ] != ELFDATA2LSB  , _Fail_, "unsupported endianess");
+	WHEN(header->e_ident[EI_VERSION] != EV_CURRENT   , _Fail_, "unsupported elf version");
 
-	/*TODO More checks*/
+	WHEN(header->e_machine != EM_386    , _Fail_, "e_machine != EM_386");
+	WHEN(header->e_type    != ET_DYN    , _Fail_, "wrong elf type (not ET_DYN)");
+	WHEN(header->e_version != EV_CURRENT, _Fail_, "wrong elf version");
 
-	ret = 1;
+	return 1;
 
 	_Fail_:
-	return ret;
+	return 0;
 }
 
-int readHeader(FILE *elfHandle, size_t elfSize, Elf32_Ehdr **elfHeader) {
+/* Wczytuje nagłówek pliku ELF do pamięci. */
+int readHeader(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr **elfHeader) {
 	int ret;
 	size_t bytesRead;
 	Elf32_Ehdr *tmpElfHeader;
@@ -143,20 +166,19 @@ int readHeader(FILE *elfHandle, size_t elfSize, Elf32_Ehdr **elfHeader) {
 	return ret;
 }
 
-int readSegmentTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable) {
+int readProgramHeaderTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable) {
 	size_t rowsRead;
 	Elf32_Phdr *tmpElfSegmentsTable;
 	Elf32_Off end;
+	int res;
 
-	fseek(elfHandle, elfHeader->e_phoff, SEEK_SET);
-	/* TODO error handling */
+	res = fseek(elfHandle, elfHeader->e_phoff, SEEK_SET);
+	WHEN(res != 0, _InvalidSize_, "fseek failed");
 
 	/* All values are unsigned, should not overflow */
 	end = elfHeader->e_phoff + elfHeader->e_phnum * elfHeader->e_phentsize;
 
 	LOGM("elf size: %zu, program section: [%zu; %zu]", elfSize, elfHeader->e_phoff, end);
-	LOGM("phnum: %zu", elfHeader->e_phnum);
-	LOGM("%zu", (size_t)elfHeader);
 	WHEN(elfSize < end, _InvalidSize_, "ELF file too small");
 
 	tmpElfSegmentsTable = malloc(elfHeader->e_phentsize * elfHeader->e_phnum);
@@ -170,7 +192,8 @@ int readSegmentTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, 
 	return 0;
 
 	_Fail_:
-		free(tmpElfSegmentsTable);
+	free(tmpElfSegmentsTable);
+
 	_InvalidSize_:
-		return 1;
+	return 1;
 }
