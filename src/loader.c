@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <sys/stat.h>
 #include "loader.h"
 #include "loader_private.h"
 #include "debug.h"
@@ -7,8 +8,7 @@
 struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	FILE *elfHandle;
-	struct library *lib = NULL;
-	struct library *ret = NULL;
+	struct library *lib;
 	Elf32_Ehdr *elfHeader = NULL;
 	Elf32_Phdr *elfPHTable = NULL;
 	Elf32_Off elfSize;
@@ -68,7 +68,6 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	lib->resolveSymbol = getsym;
 
 
-	ret = lib;
 	free(elfPHTable);
 
 	_ElfPHTableReadFailed_:
@@ -78,7 +77,7 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	fclose(elfHandle);
 
 	_ElfOpenFailed_:
-	return ret;
+	return lib;
 }
 
 void *library_getsym(struct library *lib, const char *name) {
@@ -90,11 +89,14 @@ void *library_getsym(struct library *lib, const char *name) {
 	return NULL;
 }
 
-/* Oblicza rozmiar pliku i wykonuje fseek na początek pliku.
+/* Oblicza rozmiar pliku.
  * Przy braku błędów zwraca 0. */
 int fileSize(FILE *handle, Elf32_Off *size) {
 	int res;
-	long tmpSize;
+	long curPos, tmpSize;
+
+	curPos = ftell(handle);
+	WHEN(curPos < 0, _Fail_, "ftell failed"); // OK
 
 	res = fseek(handle, 0L, SEEK_END);
 	WHEN(res != 0, _Fail_, "fseek failed"); // OK
@@ -102,7 +104,7 @@ int fileSize(FILE *handle, Elf32_Off *size) {
 	tmpSize = ftell(handle);
 	WHEN(tmpSize < 0, _Fail_, "ftell failed"); // OK
 
-	res = fseek(handle, 0L, SEEK_SET);
+	res = fseek(handle, curPos, SEEK_SET);
 	WHEN(res != 0, _Fail_, "fseek failed"); // OK
 
 	*size = (Elf32_Off) tmpSize;

@@ -6,23 +6,18 @@
 
 #define DEBUG
 
-/* Struct describing handle for a dynamic library */
+// Struct describing handle for a dynamic library
 struct library {
-	/* Library's elf file mapped to memory. If it is not NULL, the header will be already present. */
-	char *elfFile_buffer;
+	// Whole ELF file mapped to memory.
+	void *elfFile;
 
-	/* Function resolving local program symbols */
+	// Libraty's segments mapping.
+	void *sgmMapp;
+
+	// User provided function for symbol resolution.
 	void *(*resolveSymbol)(char const *);
 };
 
-
-/* Pseudo code
- *
- * 1. Open a given elf file
- *
- */
-
-/* Elf32_Ehdr * mapElfFile(const char * name); */
 int fileSize(FILE *handle, Elf32_Off *size);
 
 int readHeader(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr **elfHeader);
