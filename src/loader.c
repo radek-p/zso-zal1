@@ -4,8 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
-//#include <sys/types.h>
-#include <fcntl.h>
+#include <stdio.h>
 #include "loader.h"
 #include "loader_private.h"
 #include "debug.h"
@@ -25,9 +24,8 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	res = mapSegments(lib, file);
 	WHEN(res != 0, _UnmapFile_, "failed to map program segments");
 
-//	goto _UnmapSegments_;
-
-	// TODO fclose()
+	res = fclose(file);
+	WHEN(res != 0, _UnmapSegments_, "failed to close elf file");
 
 	res = doRelocations(lib);
 	WHEN(res != 0, _UnmapSegments_, "failed to perform relocations");
@@ -35,13 +33,15 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	return lib; // Success
 
 	_UnmapSegments_:
+		file = NULL;
 		munmap(lib->pSMap, (size_t) lib->uSMapSize);
 
 	_UnmapFile_:
 		munmap(lib->pFile, (size_t) lib->uFileSize);
 
 	_CloseFd_:
-		fclose(file);
+		if (file != NULL)
+			fclose(file);
 
 	_FreeLib_:
 		free(lib);
@@ -70,7 +70,6 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 	WHEN(lib == NULL, _Fail_, "malloc failed");
 
 	lib->pGetSym = getsym;
-	lib->pDyn = NULL;
 	return lib;
 
 	_Fail_:
@@ -157,8 +156,8 @@ int mapSegments(struct library *lib, FILE *file)
 		Elf32_Off  fileOffset   = phdr->p_offset - adjustment;
 		memSzAligned = ((memSzAligned - 1) / lib->uPageSize + 1) * lib->uPageSize;
 
-		LOGM("mmap fix: addr: %p", lib->pSMap + (minAligned - lib->uSMapVA));
-		LOGM("mmap fix: begin: %p, size: %p, foffset: %p", minAligned, memSzAligned, fileOffset);
+		LOGM("mmap fixed: addr: %p", (void *) (lib->pSMap + (minAligned - lib->uSMapVA)));
+		LOGM("mmap fixed: begin: %x, size: %x, foffset: %x", minAligned, memSzAligned, fileOffset);
 
 		int protectionLevel = 0;
 		if (phdr->p_flags & PF_X) protectionLevel |= PROT_EXEC;
@@ -166,7 +165,7 @@ int mapSegments(struct library *lib, FILE *file)
 		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
 
 		void * res2 = mmap(lib->pSMap + (minAligned - lib->uSMapVA), memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
-		WHEN(res2 == MAP_FAILED, _UnmapSegments_, "mmap fix failed");
+		WHEN(res2 == MAP_FAILED, _UnmapSegments_, "mmap fixed failed");
 
 		if (phdr->p_memsz > phdr->p_filesz) {
 			Elf32_Word sizeDiff = phdr->p_memsz - phdr->p_filesz;
@@ -196,26 +195,22 @@ int prepareMapInfo(struct library *lib)
 	Elf32_Addr minVA = lib->pPhdrs[0].p_vaddr;
 	Elf32_Addr maxVA = lib->pPhdrs[0].p_vaddr + lib->pPhdrs[0].p_memsz;
 
-	// Only for PT_LOAD segments are taken into account.
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
-		if (lib->pPhdrs[i].p_type == PT_LOAD) {
-			if (lib->pPhdrs[i].p_vaddr < minVA)
-				minVA = lib->pPhdrs[i].p_vaddr;
+		Elf32_Phdr *phdr = &lib->pPhdrs[i];
+		// Only for PT_LOAD segments are taken into account.
+		if (phdr->p_type == PT_LOAD) {
+			if (phdr->p_vaddr < minVA)
+				minVA = phdr->p_vaddr;
 
-			if (lib->pPhdrs[i].p_vaddr + lib->pPhdrs[i].p_memsz > maxVA)
-				maxVA = lib->pPhdrs[i].p_vaddr + lib->pPhdrs[i].p_memsz;
+			if (phdr->p_vaddr + phdr->p_memsz > maxVA)
+				maxVA = phdr->p_vaddr + phdr->p_memsz;
 
-			LOGM("segment: [%x, %x]", lib->pPhdrs[i].p_vaddr, lib->pPhdrs[i].p_memsz + lib->pPhdrs[i].p_vaddr);
-		}
-
-		if (lib->pPhdrs[i].p_type == PT_DYNAMIC) {
-			WHEN(lib->pDyn != NULL, _Fail_, "multiple PT_DYNAMIC sections");
-			lib->pDyn = (Elf32_Dyn *) lib->pFile + lib->pPhdrs[i].p_offset;
+			LOGM("segment  : [%04x, %04x]", phdr->p_vaddr, phdr->p_memsz + phdr->p_vaddr);
 		}
 	}
 
-	LOGM("Segment boundaries: [%x, %x]", minVA, maxVA);
-	LOGM("Page size: %p", (void *) sysconf(_SC_PAGE_SIZE));
+	LOGM("map area : [%04x, %04x]", minVA, maxVA);
+	LOGM("page size: %p", (void *) sysconf(_SC_PAGE_SIZE));
 
 	long tmp =  sysconf(_SC_PAGE_SIZE);
 	WHEN(tmp == -1, _Fail_, "cannot get page size");
@@ -227,7 +222,7 @@ int prepareMapInfo(struct library *lib)
 	lib->uSMapVA = minVA;
 	lib->uSMapSize = maxVA - minVA;
 
-	LOGM("mmap boundaries: [%x, %x]", minVA, maxVA);
+	LOGM("map area2: [%04x, %04x]", minVA, maxVA);
 
 	return 0;
 
@@ -237,10 +232,36 @@ int prepareMapInfo(struct library *lib)
 
 int doRelocations(struct library *lib)
 {
-	lib = lib;
-
 	LOG("Performing relocations");
+
+	int res = prepareDynamicInfo(lib);
+	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
+
+
 	return 0;
+
+	_Fail_:
+		return 1;
+}
+
+int prepareDynamicInfo(struct library *lib)
+{
+	// Find PT_DYNAMIC segment, fail if the number of that segments is not 1.
+	lib->pDyn = NULL;
+	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
+		if (lib->pPhdrs[i].p_type == PT_DYNAMIC) {
+			WHEN(lib->pDyn != NULL, _Fail_, "multiple PT_DYNAMIC sections");
+			lib->pDyn = (Elf32_Dyn *) lib->pFile + lib->pPhdrs[i].p_offset;
+			lib->uDynSize = lib->pPhdrs[i].p_filesz;
+		}
+	}
+	WHEN(lib->pDyn == NULL, _Fail_, "failed to find PT_DYNAMIC segment");
+
+//	lib->pDyn->
+	return 0;
+
+	_Fail_:
+		return 1;
 }
 
 /* Oblicza rozmiar pliku.

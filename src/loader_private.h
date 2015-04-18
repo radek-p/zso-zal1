@@ -30,7 +30,11 @@ struct library {
 	// Array of program headers
 	Elf32_Phdr *pPhdrs;
 
+	// Pointer to PT_DYNAMIC table
 	Elf32_Dyn *pDyn;
+
+	// Length of PT_DYNAMIC table
+	Elf32_Word uDynSize;
 
 	// System's page size
 	Elf32_Off uPageSize;
@@ -50,5 +54,7 @@ int mapSegments(struct library *lib, FILE *file);
 int prepareMapInfo(struct library *lib);
 
 int doRelocations(struct library *lib);
+
+int prepareDynamicInfo(struct library *lib);
 
 int fileSize(int fd, off_t *size);
