@@ -9,13 +9,13 @@
 // Struct describing handle for a dynamic library
 struct library {
 	// Whole Elf file mapped to memory.
-	void *pFile;
+	char *pFile;
 
 	// Elf file size.
 	Elf32_Off uFileSize;
 
 	// Libraty's segments mapping.
-	void *pSMap;
+	char *pSMap;
 
 	// Mapping size
 	Elf32_Off uSMapSize;
@@ -45,14 +45,10 @@ int loadElfFile(struct library *lib, int fd);
 
 int checkElfHeader(struct library *lib);
 
-int mapSegments(struct library *lib, int fd);
+int mapSegments(struct library *lib, FILE *file);
 
 int prepareMapInfo(struct library *lib);
 
 int doRelocations(struct library *lib);
 
 int fileSize(int fd, off_t *size);
-
-//int readHeader(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr **elfHeader);
-
-int readProgramHeaderTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable);

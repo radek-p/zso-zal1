@@ -3,6 +3,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <string.h>
 //#include <sys/types.h>
 #include <fcntl.h>
 #include "loader.h"
@@ -10,94 +11,23 @@
 #include "debug.h"
 
 
-//struct library *library_load2(const char *name, void *(*getsym)(char const *)) {
-//
-//	FILE *elfHandle;
-//	struct library *lib;
-//	Elf32_Ehdr *elfHeader = NULL;
-//	Elf32_Phdr *elfPHTable = NULL;
-//	Elf32_Off elfSize;
-//	Elf32_Half i;
-//	Elf32_Addr minVAddr, maxVAddr;
-//	int res;
-//
-//	elfHandle = fopen(name, "r");
-//	WHEN(elfHandle == NULL, _ElfOpenFailed_, "Failed to open ELF file.");
-//
-//	res = fileSize(elfHandle, &elfSize);
-//	WHEN(res != 0, _ElfReadFailed_, "cannot get file size");
-//
-//	res = readHeader(elfHandle, elfSize, &elfHeader);
-//	WHEN(res != 0, _ElfReadFailed_, "invalid ELF header");
-//	WHEN(elfHeader->e_phnum <= 0, _ElfPHTableReadFailed_, "no entries in PH table");
-//
-//	/* TODO move this to separate procedure */
-//	res = readProgramHeaderTable(elfHandle, elfSize, elfHeader, &elfPHTable);
-//	WHEN(res != 0, _ElfReadFailed_, "invalid ELF segment table");
-//
-//	LOGM("There are %zu program headers:", elfHeader->e_phnum);
-//
-//	minVAddr = elfPHTable[0].p_vaddr;
-//	maxVAddr = elfPHTable[0].p_vaddr + elfPHTable[0].p_memsz;
-//
-//	for (i = 0; i < elfHeader->e_phnum; ++i) {
-//		/* TODO What about PT_DYNAMIC ? */
-//		if (elfPHTable[i].p_type == PT_LOAD) {
-//			if (elfPHTable[i].p_vaddr < minVAddr)
-//				minVAddr = elfPHTable[i].p_vaddr;
-//
-//			if (elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz > maxVAddr)
-//				maxVAddr = elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz;
-//
-//			LOGM("      [%zu, %zu] (size: %zu)", elfPHTable[i].p_vaddr, elfPHTable[i].p_vaddr + elfPHTable[i].p_memsz, elfPHTable[i].p_memsz);
-//		}
-//		switch ((elfPHTable + i)->p_type) {
-//			case PT_LOAD:
-//				LOGM("  #%d: PT_LOAD", i);
-//				break;
-//			case PT_DYNAMIC:
-//				LOGM("  #%d: PT_DYNAMIC", i);
-//				break;
-//			default:
-//				LOGM("  #%d: %zu", i, elfPHTable[i].p_type);
-//		}
-//	}
-//
-//	LOGM("map size: [%zu, %zu]", minVAddr, maxVAddr);
-//
-//	/* TODO */
-//	/* Map ELF to memory */
-//	/* preform needed relocations */
-//	/* ... */
-//	lib = malloc(sizeof(struct library));
-//	lib->pGetSym = getsym;
-//
-//
-//	free(elfPHTable);
-//
-//	_ElfPHTableReadFailed_:
-//	free(elfHeader);
-//
-//	_ElfReadFailed_:
-//	fclose(elfHandle);
-//
-//	_ElfOpenFailed_:
-//	return lib;
-//}
-
 struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	struct library *lib = initLibStruct(getsym);
 	WHEN(lib == NULL, _Fail_, "init failed");
 
-	int fd = open(name, O_RDONLY);
-	WHEN(fd == -1, _FreeLib_, "open failed");
+	FILE *file = fopen(name, "r");
+	WHEN(file == NULL, _FreeLib_, "open failed");
 
-	int res = loadElfFile(lib, fd);
+	int res = loadElfFile(lib, fileno(file));
 	WHEN(res != 0, _CloseFd_, "failed to load Elf file");
 
-	res = mapSegments(lib, fd);
+	res = mapSegments(lib, file);
 	WHEN(res != 0, _UnmapFile_, "failed to map program segments");
+
+//	goto _UnmapSegments_;
+
+	// TODO fclose()
 
 	res = doRelocations(lib);
 	WHEN(res != 0, _UnmapSegments_, "failed to perform relocations");
@@ -111,7 +41,7 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 		munmap(lib->pFile, (size_t) lib->uFileSize);
 
 	_CloseFd_:
-		close(fd);
+		fclose(file);
 
 	_FreeLib_:
 		free(lib);
@@ -121,6 +51,9 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 }
 
 void *library_getsym(struct library *lib, const char *name) {
+
+	lib = (void *) lib;
+	name = (void *) name;
 	/* Return pointer to symbol
 	 * It will be either:
 	 *  a) constant,
@@ -157,9 +90,6 @@ int loadElfFile(struct library *lib, int fd)
 
 	lib->pFile = mmap(NULL, (size_t) lib->uFileSize, PROT_READ, MAP_PRIVATE, fd, 0);
 	WHEN(lib->pFile == MAP_FAILED, _Fail_, "mmap failed");
-
-	res = close(fd);
-	WHEN(res != 0, _UnmapFile_, "close failed");
 
 	lib->pEhdr = (Elf32_Ehdr *) lib->pFile;
 
@@ -203,7 +133,7 @@ int checkElfHeader(struct library *lib)
 	return 1;
 }
 
-int mapSegments(struct library *lib, int fd)
+int mapSegments(struct library *lib, FILE *file)
 {
 	LOG("Mapping segments");
 
@@ -211,30 +141,51 @@ int mapSegments(struct library *lib, int fd)
 	WHEN(res != 0, _Fail_, "couldn't prepare to do mmap");
 
 	// TODO Change default protection level.
-	lib->pSMap = mmap(NULL, (size_t) lib->uSMapSize, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, (off_t) lib->uSMapSize);
+	lib->pSMap = mmap(NULL, (size_t) lib->uSMapSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, (off_t) lib->uSMapSize);
 	WHEN(lib->pSMap == MAP_FAILED, _Fail_, "mmap failed");
 
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
-		Elf32_Off  adjustment   = lib->pPhdrs[i].p_vaddr % lib->uPageSize;
-		Elf32_Addr minAligned   = lib->pPhdrs[i].p_vaddr - adjustment;
-		Elf32_Off  memSzAligned = lib->pPhdrs[i].p_memsz + adjustment;
-		Elf32_Off  fileOffset   = lib->pPhdrs[i].p_offset - adjustment;
+
+		if (lib->pPhdrs[i].p_type != PT_LOAD)
+			continue;
+
+		Elf32_Phdr *phdr = &lib->pPhdrs[i];
+
+		Elf32_Off  adjustment   = phdr->p_vaddr % lib->uPageSize;
+		Elf32_Addr minAligned   = phdr->p_vaddr  - adjustment;
+		Elf32_Off  memSzAligned = phdr->p_memsz  + adjustment;
+		Elf32_Off  fileOffset   = phdr->p_offset - adjustment;
 		memSzAligned = ((memSzAligned - 1) / lib->uPageSize + 1) * lib->uPageSize;
 
-		LOGM("mmap fix: (%p), %p, %p, %p", lib->pSMap + (minAligned - lib->uSMapVA), minAligned, memSzAligned, fileOffset);
+		LOGM("mmap fix: addr: %p", lib->pSMap + (minAligned - lib->uSMapVA));
+		LOGM("mmap fix: begin: %p, size: %p, foffset: %p", minAligned, memSzAligned, fileOffset);
 
 		int protectionLevel = 0;
-		if (lib->pPhdrs[i].p_flags & PF_X) protectionLevel |= PROT_EXEC;
-		if (lib->pPhdrs[i].p_flags & PF_W) protectionLevel |= PROT_WRITE;
-		if (lib->pPhdrs[i].p_flags & PF_R) protectionLevel |= PROT_READ;
+		if (phdr->p_flags & PF_X) protectionLevel |= PROT_EXEC;
+		if (phdr->p_flags & PF_W) protectionLevel |= PROT_WRITE;
+		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
 
-		void * res2 = mmap(lib->pSMap + (minAligned - lib->uSMapVA), memSzAligned, protectionLevel, MAP_FIXED, fd, fileOffset);
-		WHEN(res2 == MAP_FAILED, _Fail_, "mmap fix failed");
+		void * res2 = mmap(lib->pSMap + (minAligned - lib->uSMapVA), memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
+		WHEN(res2 == MAP_FAILED, _UnmapSegments_, "mmap fix failed");
+
+		if (phdr->p_memsz > phdr->p_filesz) {
+			Elf32_Word sizeDiff = phdr->p_memsz - phdr->p_filesz;
+
+			// TODO error handling
+			memset(lib->pSMap + phdr->p_vaddr - lib->uSMapVA + phdr->p_filesz, 0x0, sizeDiff);
+
+			LOGM("p_memsz: %04x, p_filesz: %04x", phdr->p_memsz, phdr->p_filesz);
+			LOGM("memset(%p, %04x, %04x)", (void *) (lib->pSMap + phdr->p_vaddr - lib->uSMapVA + phdr->p_filesz), 0x0, sizeDiff);
+		}
 	}
 
-
 	return 0;
+
+	_UnmapSegments_:
+		munmap(lib->pSMap, lib->uSMapSize);
+
 	_Fail_:
+		perror("[ERR]    : ");
 		return 1;
 }
 
@@ -254,7 +205,7 @@ int prepareMapInfo(struct library *lib)
 			if (lib->pPhdrs[i].p_vaddr + lib->pPhdrs[i].p_memsz > maxVA)
 				maxVA = lib->pPhdrs[i].p_vaddr + lib->pPhdrs[i].p_memsz;
 
-			LOGM("segment: [%p, %p]", (void *) lib->pPhdrs[i].p_vaddr, (void *) lib->pPhdrs[i].p_memsz + lib->pPhdrs[i].p_vaddr);
+			LOGM("segment: [%x, %x]", lib->pPhdrs[i].p_vaddr, lib->pPhdrs[i].p_memsz + lib->pPhdrs[i].p_vaddr);
 		}
 
 		if (lib->pPhdrs[i].p_type == PT_DYNAMIC) {
@@ -263,7 +214,7 @@ int prepareMapInfo(struct library *lib)
 		}
 	}
 
-	LOGM("Segment boundaries: [%p, %p]", (void *) minVA, (void *) maxVA);
+	LOGM("Segment boundaries: [%x, %x]", minVA, maxVA);
 	LOGM("Page size: %p", (void *) sysconf(_SC_PAGE_SIZE));
 
 	long tmp =  sysconf(_SC_PAGE_SIZE);
@@ -276,7 +227,7 @@ int prepareMapInfo(struct library *lib)
 	lib->uSMapVA = minVA;
 	lib->uSMapSize = maxVA - minVA;
 
-	LOGM("mmap boundaries: [%p, %p]", (void *) minVA, (void *) maxVA);
+	LOGM("mmap boundaries: [%x, %x]", minVA, maxVA);
 
 	return 0;
 
@@ -286,6 +237,8 @@ int prepareMapInfo(struct library *lib)
 
 int doRelocations(struct library *lib)
 {
+	lib = lib;
+
 	LOG("Performing relocations");
 	return 0;
 }
@@ -304,67 +257,4 @@ int fileSize(int fd, off_t *size) {
 
 	_Fail_:
 		return 1;
-}
-
-/* Wczytuje nagłówek pliku ELF do pamięci. */
-//int readHeader(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr **elfHeader) {
-//	int ret;
-//	size_t bytesRead;
-//	Elf32_Ehdr *tmpElfHeader;
-//
-//	ret = 1;
-//
-//	WHEN(elfSize < sizeof(Elf32_Ehdr), _InvalidSize_, "elf header too small");
-//
-//	tmpElfHeader = malloc(sizeof(Elf32_Ehdr));
-//	WHEN(tmpElfHeader == NULL, _Fail_, "malloc failed");
-//
-//	bytesRead = fread(tmpElfHeader, 1, sizeof(Elf32_Ehdr), elfHandle);
-//	LOGM(" bytes read: %zu", bytesRead);
-//	LOGM("header size: %zu", sizeof(Elf32_Ehdr));
-//	WHEN(bytesRead != sizeof(Elf32_Ehdr), _Fail_, "fread failed");
-//
-////	WHEN(!isHeaderValid(tmpElfHeader), _Fail_, "elf header is not valid");
-//
-//	*elfHeader = tmpElfHeader;
-//	ret = 0;
-//
-//	_Fail_:
-//	if (ret != 0)
-//		free(tmpElfHeader);
-//
-//	_InvalidSize_:
-//	return ret;
-//}
-
-int readProgramHeaderTable(FILE *elfHandle, Elf32_Off elfSize, Elf32_Ehdr *elfHeader, Elf32_Phdr **elfSegmentsTable) {
-	size_t rowsRead;
-	Elf32_Phdr *tmpElfSegmentsTable;
-	Elf32_Off end;
-	int res;
-
-	res = fseek(elfHandle, elfHeader->e_phoff, SEEK_SET);
-	WHEN(res != 0, _InvalidSize_, "fseek failed");
-
-	/* All values are unsigned, should not overflow */
-	end = elfHeader->e_phoff + elfHeader->e_phnum * elfHeader->e_phentsize;
-
-	LOGM("elf size: %zu, program section: [%zu; %zu]", elfSize, elfHeader->e_phoff, end);
-	WHEN(elfSize < end, _InvalidSize_, "ELF file too small");
-
-	tmpElfSegmentsTable = malloc(elfHeader->e_phentsize * elfHeader->e_phnum);
-	WHEN(tmpElfSegmentsTable == NULL, _Fail_, "malloc failed");
-
-	rowsRead = fread(tmpElfSegmentsTable, elfHeader->e_phentsize, elfHeader->e_phnum, elfHandle);
-	WHEN(rowsRead != elfHeader->e_phnum, _Fail_, "cannot read ELF segments table");
-
-	*elfSegmentsTable = tmpElfSegmentsTable;
-
-	return 0;
-
-	_Fail_:
-	free(tmpElfSegmentsTable);
-
-	_InvalidSize_:
-	return 1;
 }
