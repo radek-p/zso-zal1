@@ -20,10 +20,6 @@ struct library {
 	// Mapping size
 	Elf32_Off uSMapSize;
 
-	// Virtual address corresponding to pSMap
-	// If minimal virt. addr. of prog. header is < page size, it will be 0.
-	Elf32_Addr uSMapVA;
-
 	// Address of Elf header (equal to pFile, but different type)
 	Elf32_Ehdr *pEhdr;
 

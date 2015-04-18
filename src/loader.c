@@ -64,7 +64,7 @@ void *library_getsym(struct library *lib, const char *name) {
 
 struct library *initLibStruct(void *(*getsym)(char const *)) {
 
-	LOG("Initializing lib struct");
+	SLOG("Initializing lib struct");
 
 	struct library *lib = malloc(sizeof(struct library));
 	WHEN(lib == NULL, _Fail_, "malloc failed");
@@ -78,7 +78,7 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 
 int loadElfFile(struct library *lib, int fd)
 {
-	LOG("Mapping elf file to memory");
+	SLOG("Mapping elf file to memory");
 
 	off_t size;
 	int res = fileSize(fd, &size);
@@ -134,7 +134,7 @@ int checkElfHeader(struct library *lib)
 
 int mapSegments(struct library *lib, FILE *file)
 {
-	LOG("Mapping segments");
+	SLOG("Mapping segments");
 
 	int res = prepareMapInfo(lib);
 	WHEN(res != 0, _Fail_, "couldn't prepare to do mmap");
@@ -156,7 +156,7 @@ int mapSegments(struct library *lib, FILE *file)
 		Elf32_Off  fileOffset   = phdr->p_offset - adjustment;
 		memSzAligned = ((memSzAligned - 1) / lib->uPageSize + 1) * lib->uPageSize;
 
-		LOGM("mmap fixed: addr: %p", (void *) (lib->pSMap + (minAligned - lib->uSMapVA)));
+		LOGM("mmap fixed: addr: %p", (void *) (lib->pSMap + minAligned));
 		LOGM("mmap fixed: begin: %x, size: %x, foffset: %x", minAligned, memSzAligned, fileOffset);
 
 		int protectionLevel = 0;
@@ -164,17 +164,17 @@ int mapSegments(struct library *lib, FILE *file)
 		if (phdr->p_flags & PF_W) protectionLevel |= PROT_WRITE;
 		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
 
-		void * res2 = mmap(lib->pSMap + (minAligned - lib->uSMapVA), memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
+		void * res2 = mmap(lib->pSMap + minAligned, memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
 		WHEN(res2 == MAP_FAILED, _UnmapSegments_, "mmap fixed failed");
 
 		if (phdr->p_memsz > phdr->p_filesz) {
 			Elf32_Word sizeDiff = phdr->p_memsz - phdr->p_filesz;
 
 			// TODO error handling
-			memset(lib->pSMap + phdr->p_vaddr - lib->uSMapVA + phdr->p_filesz, 0x0, sizeDiff);
+			memset(lib->pSMap + phdr->p_vaddr + phdr->p_filesz, 0x0, sizeDiff);
 
 			LOGM("p_memsz: %04x, p_filesz: %04x", phdr->p_memsz, phdr->p_filesz);
-			LOGM("memset(%p, %04x, %04x)", (void *) (lib->pSMap + phdr->p_vaddr - lib->uSMapVA + phdr->p_filesz), 0x0, sizeDiff);
+			LOGM("memset(%p, %04x, %04x)", (void *) (lib->pSMap + phdr->p_vaddr + phdr->p_filesz), 0x0, sizeDiff);
 		}
 	}
 
@@ -192,16 +192,12 @@ int prepareMapInfo(struct library *lib)
 {
 	WHEN(lib->pEhdr->e_phnum < 1, _Fail_, "file does not contain program header table");
 
-	Elf32_Addr minVA = lib->pPhdrs[0].p_vaddr;
 	Elf32_Addr maxVA = lib->pPhdrs[0].p_vaddr + lib->pPhdrs[0].p_memsz;
 
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
 		Elf32_Phdr *phdr = &lib->pPhdrs[i];
 		// Only for PT_LOAD segments are taken into account.
 		if (phdr->p_type == PT_LOAD) {
-			if (phdr->p_vaddr < minVA)
-				minVA = phdr->p_vaddr;
-
 			if (phdr->p_vaddr + phdr->p_memsz > maxVA)
 				maxVA = phdr->p_vaddr + phdr->p_memsz;
 
@@ -209,20 +205,17 @@ int prepareMapInfo(struct library *lib)
 		}
 	}
 
-	LOGM("map area : [%04x, %04x]", minVA, maxVA);
+	LOGM("map area : [%04x, %04x]", 0x0, maxVA);
 	LOGM("page size: %p", (void *) sysconf(_SC_PAGE_SIZE));
 
 	long tmp =  sysconf(_SC_PAGE_SIZE);
 	WHEN(tmp == -1, _Fail_, "cannot get page size");
 	lib->uPageSize = (Elf32_Off) tmp;
 
-	minVA = lib->uPageSize * ( minVA      / lib->uPageSize    );
 	maxVA = lib->uPageSize * ((maxVA - 1) / lib->uPageSize + 1);
+	lib->uSMapSize = maxVA;
 
-	lib->uSMapVA = minVA;
-	lib->uSMapSize = maxVA - minVA;
-
-	LOGM("map area2: [%04x, %04x]", minVA, maxVA);
+	LOGM("map area2: [%04x, %04x]", 0x0, maxVA);
 
 	return 0;
 
@@ -232,10 +225,12 @@ int prepareMapInfo(struct library *lib)
 
 int doRelocations(struct library *lib)
 {
-	LOG("Performing relocations");
+	SLOG("Finding dynamic info");
 
 	int res = prepareDynamicInfo(lib);
 	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
+
+	SLOG("Performing relocations");
 
 	size_t dtRelLength = lib->dtRelSz / sizeof(Elf32_Rel);
 	for (Elf32_Half i = 0; i < dtRelLength; ++i) {

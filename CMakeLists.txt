@@ -12,4 +12,12 @@ set(SOURCE_FILES
     src/loader.c
 )
 
+set(LIB_SRC
+    src/loader.h
+    src/loader_private.h
+    src/loader.c
+)
+
 add_executable(read_elf ${SOURCE_FILES})
+
+add_library(loader SHARED ${LIB_SRC})
