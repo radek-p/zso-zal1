@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-//#define DEBUG
+#define DEBUG
 
 // Struct describing handle for a dynamic library
 struct library {

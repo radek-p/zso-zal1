@@ -5,17 +5,17 @@ project(zal1)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -pedantic -Wall -Wextra -Wno-format")
 
-set(SOURCE_FILES
-    src/readElf.c
-    src/loader.h
-    src/loader_private.h
-    src/loader.c
-)
+#set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
 
 set(LIB_SRC
     src/loader.h
     src/loader_private.h
     src/loader.c
+)
+
+set(SOURCE_FILES
+    src/readElf.c
+    ${LIB_SRC}
 )
 
 add_executable(read_elf ${SOURCE_FILES})

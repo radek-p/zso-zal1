@@ -1,5 +1,5 @@
-#include "loader.h"
 #define DEBUG
+#include "loader.h"
 #include "debug.h"
 #include "stdlib.h"
 

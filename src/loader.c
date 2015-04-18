@@ -30,6 +30,8 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	res = doRelocations(lib);
 	WHEN(res != 0, _UnmapSegments_, "failed to perform relocations");
 
+	LOGS("Done");
+
 	return lib; // Success
 
 	_UnmapSegments_:
@@ -66,7 +68,7 @@ void *library_getsym(struct library *lib, const char *name) {
 
 struct library *initLibStruct(void *(*getsym)(char const *)) {
 
-	SLOG("Initializing lib struct");
+	LOGS("Initializing lib struct");
 
 	struct library *lib = malloc(sizeof(struct library));
 	WHEN(lib == NULL, _Fail_, "malloc failed");
@@ -80,7 +82,7 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 
 int loadElfFile(struct library *lib, int fd)
 {
-	SLOG("Mapping elf file to memory");
+	LOGS("Mapping elf file to memory");
 
 	off_t size;
 	int res = fileSize(fd, &size);
@@ -136,7 +138,7 @@ int checkElfHeader(struct library *lib)
 
 int mapSegments(struct library *lib, FILE *file)
 {
-	SLOG("Mapping segments");
+	LOGS("Mapping segments");
 
 	int res = prepareMapInfo(lib);
 	WHEN(res != 0, _Fail_, "couldn't prepare to do mmap");
@@ -227,13 +229,13 @@ int prepareMapInfo(struct library *lib)
 
 int doRelocations(struct library *lib)
 {
-	SLOG("Finding dynamic info");
+	LOGS("Finding dynamic info");
 
 	int res = prepareDynamicInfo(lib);
 	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
 
 	if (lib->dtRel != NULL) {
-		SLOG("Performing DT_REL relocations");
+		LOGS("Performing DT_REL relocations");
 		size_t dtRelLength = lib->dtRelSz / sizeof(Elf32_Rel);
 		for (Elf32_Half i = 0; i < dtRelLength; ++i) {
 			res = relocate(lib, &lib->dtRel[i]);
@@ -243,7 +245,7 @@ int doRelocations(struct library *lib)
 
 	if (lib->dtJmpRel != NULL)
 	{
-		SLOG("Performing DT_JMPREL relocations");
+		LOGS("Performing DT_JMPREL relocations");
 		size_t dtJmpRelLength = lib->dtPltRelSz / sizeof(Elf32_Rel);
 		LOGM("relocations num: %zu", dtJmpRelLength);
 		for (Elf32_Half i = 0; i < dtJmpRelLength; ++i)
@@ -319,8 +321,38 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 	// TODO checks
 	Elf32_Half symIdx = (Elf32_Half) ELF32_R_SYM(rel->r_info);
 	Elf32_Sym *sym = &lib->dtSymTab[symIdx];
+
+	switch (ELF32_ST_TYPE(sym->st_info)) {
+		case STT_NOTYPE:
+			LOG("STT_NOTYPE");
+			break;
+		case STT_FUNC:
+			LOG("STT_FUNC");
+			break;
+		case STT_OBJECT:
+			LOG("STT_OBJECT");
+			break;
+		default:
+			LOG("IGNORED A SYMBOL!");
+			return 1;
+	}
+
+	LOGM("defined in section: %x", sym->st_shndx);
+
+	if (sym->st_shndx == SHN_UNDEF) {
+		LOG("SHN_UNDEFINED");
+		return 0;
+	}
+
+	if (sym->st_shndx >= SHN_LORESERVE) {
+		LOG("> SHN_LORESERVE");
+		return 1;
+	}
+
 	char *name = &lib->dtStrTab[sym->st_name];
-	LOGM("relocating %s", name);
+	LOGM("relocating %p", (void *)name);
+//	LOGM("relocating %s", name);
+	LOGM("rel addr: %p", rel);
 
 	switch (ELF32_R_TYPE(rel->r_info)) {
 		case R_386_32:
@@ -344,6 +376,8 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 			LOG("unsupported relocation type");
 			return 1; //TODO
 	}
+
+	LOG("Finished");
 
 	return 0;
 }
