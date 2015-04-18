@@ -251,13 +251,38 @@ int prepareDynamicInfo(struct library *lib)
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
 		if (lib->pPhdrs[i].p_type == PT_DYNAMIC) {
 			WHEN(lib->pDyn != NULL, _Fail_, "multiple PT_DYNAMIC sections");
-			lib->pDyn = (Elf32_Dyn *) lib->pFile + lib->pPhdrs[i].p_offset;
-			lib->uDynSize = lib->pPhdrs[i].p_filesz;
+			lib->pDyn = (Elf32_Dyn *) (lib->pSMap + lib->pPhdrs[i].p_vaddr);
+			lib->uDynSize = lib->pPhdrs[i].p_memsz;
 		}
 	}
 	WHEN(lib->pDyn == NULL, _Fail_, "failed to find PT_DYNAMIC segment");
 
-//	lib->pDyn->
+	size_t uDynNum = lib->uDynSize / (sizeof(Elf32_Dyn));
+	for (size_t i = 0; i < uDynNum; ++i) {
+		switch (lib->pDyn[i].d_tag) {
+			case DT_PLTRELSZ: LOG("DT_PLTRELSZ");
+				break;
+			case DT_JMPREL: LOG("DT_JMPREL");
+				break;
+			case DT_PLTGOT: LOG("DT_PLTGOT");
+				break;
+			case DT_STRTAB: LOG("DT_STRTAB");
+				break;
+			case DT_SYMTAB: LOG("DT_SYMTAB");
+				break;
+			case DT_REL: LOG("DT_REL");
+				break;
+			case DT_RELSZ: LOG("DT_RELSZ");
+				break;
+			case DT_HASH: LOG("DT_HASH");
+				break;
+			case DT_NULL:
+				LOG("DT_NULL!");
+				break;
+			default:
+				LOG("other DT_* entry");
+		}
+	}
 	return 0;
 
 	_Fail_:
