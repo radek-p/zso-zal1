@@ -54,11 +54,13 @@ void *library_getsym(struct library *lib, const char *name) {
 
 	lib = (void *) lib;
 	name = (void *) name;
-	/* Return pointer to symbol
-	 * It will be either:
-	 *  a) constant,
-	 *  b) pointer to function
-	 *  */
+	for (size_t i = 0; i < lib->dtDynSymTabLength; ++i) {
+		Elf32_Sym *sym = &lib->dtSymTab[i];
+		if (strcmp(name, &lib->dtStrTab[sym->st_name]) == 0) {
+			LOGM("found %s at address %p", name, (void *)(lib->pSMap + sym->st_value));
+			return lib->pSMap + sym->st_value;
+		}
+	}
 	return NULL;
 }
 
@@ -230,18 +232,25 @@ int doRelocations(struct library *lib)
 	int res = prepareDynamicInfo(lib);
 	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
 
-	SLOG("Performing relocations");
-
-	size_t dtRelLength = lib->dtRelSz / sizeof(Elf32_Rel);
-	for (Elf32_Half i = 0; i < dtRelLength; ++i) {
-		res = relocate(lib, &lib->dtRel[i]);
-		WHEN(res != 0, _Fail_, "relocation failed");
+	if (lib->dtRel != NULL) {
+		SLOG("Performing DT_REL relocations");
+		size_t dtRelLength = lib->dtRelSz / sizeof(Elf32_Rel);
+		for (Elf32_Half i = 0; i < dtRelLength; ++i) {
+			res = relocate(lib, &lib->dtRel[i]);
+			WHEN(res != 0, _Fail_, "relocation failed");
+		}
 	}
 
-	size_t dtJmpRelLength = lib->dtPltRelSz / sizeof(Elf32_Rel);
-	for (Elf32_Half i = 0; i < dtJmpRelLength; ++i) {
-		res = relocate(lib, &lib->dtRel[i]);
-		WHEN(res != 0, _Fail_, "relocation failed");
+	if (lib->dtJmpRel != NULL)
+	{
+		SLOG("Performing DT_JMPREL relocations");
+		size_t dtJmpRelLength = lib->dtPltRelSz / sizeof(Elf32_Rel);
+		LOGM("relocations num: %zu", dtJmpRelLength);
+		for (Elf32_Half i = 0; i < dtJmpRelLength; ++i)
+		{
+			res = relocate(lib, &lib->dtJmpRel[i]);
+			WHEN(res != 0, _Fail_, "relocation failed");
+		}
 	}
 
 	return 0;
@@ -263,8 +272,10 @@ int prepareDynamicInfo(struct library *lib)
 	}
 	WHEN(lib->pDyn == NULL, _Fail_, "failed to find PT_DYNAMIC segment");
 
-	size_t uDynNum = lib->uDynSize / (sizeof(Elf32_Dyn));
-	for (size_t i = 0; i < uDynNum && lib->pDyn[i].d_tag != DT_NULL; ++i) {
+	lib->dtRel = lib->dtJmpRel = NULL;
+
+	size_t uDynLength = lib->uDynSize / (sizeof(Elf32_Dyn));
+	for (size_t i = 0; i < uDynLength && lib->pDyn[i].d_tag != DT_NULL; ++i) {
 		Elf32_Dyn *pDyn = &lib->pDyn[i];
 		Elf32_Addr addr = pDyn->d_un.d_ptr;
 		Elf32_Word val  = pDyn->d_un.d_val;
@@ -279,8 +290,8 @@ int prepareDynamicInfo(struct library *lib)
 			case DT_RELSZ:    LOG("DT_RELSZ");    lib->dtRelSz    = val;                               break;
 			case DT_HASH:     LOG("DT_HASH");
 				// The Oracle docs say that hash chain number is equal to dynsymtab length.
-				lib->dtDynSymTabSz = *((Elf32_Off *)(lib->pSMap + addr + 0x4));
-				LOGM("symtab length (from Hash): %04x", lib->dtDynSymTabSz);
+				lib->dtDynSymTabLength = *((Elf32_Off *)(lib->pSMap + addr + 0x4));
+				LOGM("symtab length (from Hash): %04x", lib->dtDynSymTabLength);
 				break;
 			// Assertions:
 			case DT_PLTREL:
@@ -305,16 +316,19 @@ int prepareDynamicInfo(struct library *lib)
 
 int relocate(struct library *lib, Elf32_Rel *rel)
 {
-	char *name = &lib->dtStrTab[lib->dtSymTab[ELF32_R_SYM(rel->r_info)].st_name];
-
+	// TODO checks
+	Elf32_Half symIdx = (Elf32_Half) ELF32_R_SYM(rel->r_info);
+	Elf32_Sym *sym = &lib->dtSymTab[symIdx];
+	char *name = &lib->dtStrTab[sym->st_name];
 	LOGM("relocating %s", name);
 
 	switch (ELF32_R_TYPE(rel->r_info)) {
 		case R_386_32:
 			LOG("R_386_32");
+			*(void **)(lib->pSMap + rel->r_offset) = lib->pGetSym(name);
 			break;
 		case R_386_JMP_SLOT:
-//			*(void **)(lib->pSMap + rel->r_offset) =
+			*(void **)(lib->pSMap + rel->r_offset) = lib->pGetSym(name);
 			LOG("R_386_JMP_SLOT");
 			break;
 		case R_386_PC32:
@@ -330,6 +344,7 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 			LOG("unsupported relocation type");
 			return 1; //TODO
 	}
+
 	return 0;
 }
 

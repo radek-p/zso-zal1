@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define DEBUG
+//#define DEBUG
 
 // Struct describing handle for a dynamic library
 struct library {
@@ -43,7 +43,7 @@ struct library {
 	Elf32_Sym *dtSymTab;
 	Elf32_Rel *dtRel;
 	Elf32_Word dtRelSz;
-	Elf32_Word dtDynSymTabSz;
+	Elf32_Word dtDynSymTabLength;
 
 	// User provided function for symbol resolution.
 	void *(*pGetSym)(char const *);

@@ -2,3 +2,5 @@ build/
 build64/
 samples/
 .idea/
+old/
+tests/
