@@ -340,8 +340,9 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 	LOGM("defined in section: %x", sym->st_shndx);
 
 	if (sym->st_shndx == SHN_UNDEF) {
-		LOG("SHN_UNDEFINED");
-		return 0;
+		LOGM("SHN_UNDEFINED, st_name: %x", sym->st_name);
+		LOGM("write: %s", lib->dtStrTab + sym->st_name);
+//		return 0;
 	}
 
 	if (sym->st_shndx >= SHN_LORESERVE) {
@@ -349,19 +350,24 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 		return 1;
 	}
 
-	char *name = &lib->dtStrTab[sym->st_name];
+	char *name = lib->dtStrTab + sym->st_name;
 	LOGM("relocating %p", (void *)name);
 //	LOGM("relocating %s", name);
 	LOGM("rel addr: %p", rel);
 
+	void * resSym;
 	switch (ELF32_R_TYPE(rel->r_info)) {
 		case R_386_32:
 			LOG("R_386_32");
-			*(void **)(lib->pSMap + rel->r_offset) = lib->pGetSym(name);
+			resSym = lib->pGetSym(name);
+			WHEN(resSym == NULL, _Fail_, "getSym failed");
+			*(void **)(lib->pSMap + rel->r_offset) = resSym;
 			break;
 		case R_386_JMP_SLOT:
-			*(void **)(lib->pSMap + rel->r_offset) = lib->pGetSym(name);
 			LOG("R_386_JMP_SLOT");
+			resSym = lib->pGetSym(name);
+			WHEN(resSym == NULL, _Fail_, "getSym failed");
+			*(void **)(lib->pSMap + rel->r_offset) = resSym;
 			break;
 		case R_386_PC32:
 			LOG("R_386_PC32");
@@ -380,6 +386,9 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 	LOG("Finished");
 
 	return 0;
+
+	_Fail_:
+		return 1;
 }
 
 /* Oblicza rozmiar pliku.
