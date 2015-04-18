@@ -39,6 +39,16 @@ struct library {
 	// System's page size
 	Elf32_Off uPageSize;
 
+	// Info form PT_DYNAMIC segment
+	Elf32_Word dtPltRelSz;
+	Elf32_Rel *dtJmpRel;
+	void *dtPltGot;
+	char *dtStrTab;
+	Elf32_Sym *dtSymTab;
+	Elf32_Rel *dtRel;
+	Elf32_Word dtRelSz;
+	Elf32_Word dtDynSymTabSz;
+
 	// User provided function for symbol resolution.
 	void *(*pGetSym)(char const *);
 };
@@ -54,6 +64,8 @@ int mapSegments(struct library *lib, FILE *file);
 int prepareMapInfo(struct library *lib);
 
 int doRelocations(struct library *lib);
+
+int relocate(struct library *lib, Elf32_Rel *rel);
 
 int prepareDynamicInfo(struct library *lib);
 
