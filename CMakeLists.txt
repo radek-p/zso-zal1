@@ -5,34 +5,28 @@ project(zal1)
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -std=c99 -pedantic -Wall -Wextra -Wno-format")
 
-#set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
-
 set(LIB_SRC
     src/loader.h
     src/loader_private.h
     src/loader.c
 )
 
-set(SOURCE_FILES
-    src/readElf.c
-    ${LIB_SRC}
-)
+#set(SOURCE_FILES
+#    src/readElf.c
+#    ${LIB_SRC}
+#)
+#add_executable(read_elf ${SOURCE_FILES})
 
-set(TEXTREL_SRC
-    tests/testtextrel.c
-)
+#set(TEXTRELLIB_SRC
+#    tests/textrel.c
+#)
+#add_library(textrel SHARED ${TEXTRELLIB_SRC})
 
-set(TEXTRELLIB_SRC
-    tests/textrel.c
-)
+#set(TEXTREL_SRC
+#    tests/testtextrel.c
+#)
+#add_executable(testtextrel ${TEXTREL_SRC})
+#target_link_libraries(testtextrel loader)
 
-add_library(textrel SHARED ${TEXTRELLIB_SRC})
-
-add_executable(testtextrel ${TEXTREL_SRC})
-
-
-add_executable(read_elf ${SOURCE_FILES})
-
+add_definitions("-DDEBUG")
 add_library(loader SHARED ${LIB_SRC})
-
-target_link_libraries(testtextrel loader)

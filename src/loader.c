@@ -349,9 +349,9 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 	LOGM("> relocating symbol \"%s\" (defined in section: %x)", name, sym->st_shndx);
 
 	Elf32_Word *P = (Elf32_Word *)(lib->pSMap + rel->r_offset);
-	Elf32_Addr S;
 	Elf32_Word A = *P;
 	Elf32_Word B = (Elf32_Word) lib->pSMap;
+	Elf32_Addr S;
 
 	switch (ELF32_R_TYPE(rel->r_info)) {
 		case R_386_JMP_SLOT:
@@ -383,7 +383,7 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 		case R_386_PC32:
 			LOG("R_386_PC32");
 			LOGM("P: %p, A: %04x", P, A);
-//			*P = ;
+
 			S = (Elf32_Word) libraryGetSymAll(lib, name);
 			WHEN(S == (Elf32_Word) NULL, _Fail_, "cannot find symbol");
 
@@ -408,6 +408,13 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 
 	_Fail_:
 		return 1;
+}
+
+void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
+
+	LOGM("lazy resolution: lib: %p, relOffset: %04x", lib, relOffset);
+
+	return NULL;
 }
 
 /* Oblicza rozmiar pliku.

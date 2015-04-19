@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define DEBUG
 
 // Struct describing handle for a dynamic library
 struct library {
@@ -66,6 +65,8 @@ int doRelocations(struct library *lib);
 int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length);
 
 int relocate(struct library *lib, Elf32_Rel *rel);
+
+void *lazyResolve(struct library *lib, Elf32_Addr relOffset);
 
 int prepareDynamicInfo(struct library *lib);
 
