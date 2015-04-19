@@ -61,13 +61,23 @@ void *library_getsym(struct library *lib, const char *name) {
 		if (shouldIgnoreSymbol(sym))
 			continue;
 
-		if (strcmp(name, &lib->dtStrTab[sym->st_name]) == 0) {
+		size_t maxOffset = (size_t) (lib->pSMap + lib->uSMapSize) - (size_t) (&lib->dtStrTab[sym->st_name]);
+		if (sym->st_shndx != SHN_UNDEF && strncmp(name, &lib->dtStrTab[sym->st_name], maxOffset) == 0) {
 			LOGM("found %s at address %p", name, (void *)(lib->pSMap + sym->st_value));
 			return lib->pSMap + sym->st_value;
 		}
 	}
 
 	return NULL;
+}
+
+void *libraryGetSymAll(struct library *lib, const char *name)
+{
+	void *sym = library_getsym(lib, name);
+	if (sym != NULL)
+		return sym;
+
+	return lib->pGetSym(name);
 }
 
 struct library *initLibStruct(void *(*getsym)(char const *)) {
@@ -336,49 +346,62 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO CHeck?
 	char *name = lib->dtStrTab + sym->st_name;
 
-	if (sym->st_shndx == SHN_UNDEF) {
-		LOGM("symbol \"%s\" defined in section: SHN_UNDEF", name);
-	} else {
-		LOGM("symbol \"%s\" defined in section: %x", name, sym->st_shndx);
-	}
+	LOGM("> relocating symbol \"%s\" (defined in section: %x)", name, sym->st_shndx);
 
 	Elf32_Word *P = (Elf32_Word *)(lib->pSMap + rel->r_offset);
-	void * resSym;
+	Elf32_Addr S;
+	Elf32_Word A = *P;
+	Elf32_Word B = (Elf32_Word) lib->pSMap;
+
 	switch (ELF32_R_TYPE(rel->r_info)) {
+		case R_386_JMP_SLOT:
+			LOG("NOT LAZY JUMP SLOT");
+
+		case R_386_GLOB_DAT:
+			LOG("R_386_GLOB_DAT");
+
+			S = (Elf32_Word) libraryGetSymAll(lib, name);
+			WHEN(S == (Elf32_Word) NULL, _Fail_, "cannot find symbol");
+
+			*P = S;
+			break;
+
 		case R_386_32:
 			LOG("R_386_32");
 			LOGM("value: %04x", sym->st_value);
-			resSym = lib->pGetSym(name);
-			WHEN(resSym == NULL, _Fail_, "getSym failed");
 
-			*P = (Elf32_Word) resSym;
-			break;
-		case R_386_JMP_SLOT:
-			LOG("R_386_JMP_SLOT");
-			resSym = lib->pGetSym(name);
-			WHEN(resSym == NULL, _Fail_, "getSym failed");
+			S = (Elf32_Word) libraryGetSymAll(lib, name);
+			WHEN(S == (Elf32_Word) NULL, _Fail_, "getSym failed");
 
-			*P = (Elf32_Word) resSym;
+			*P = S + A;
 			break;
+
+//		case R_386_JMP_SLOT:
+//			// TODO Add laziness
+//			break;
+
 		case R_386_PC32:
 			LOG("R_386_PC32");
-//			Elf32_Addr S = sym->st_value;
+			LOGM("P: %p, A: %04x", P, A);
+//			*P = ;
+			S = (Elf32_Word) libraryGetSymAll(lib, name);
+			WHEN(S == (Elf32_Word) NULL, _Fail_, "cannot find symbol");
+
+			*P = S + A - (size_t) P;
 			break;
-		case R_386_GLOB_DAT:
-			LOG("R_386_GLOB_DAT");
-			break;
+
 		case R_386_RELATIVE:
 			LOG("R_386_RELATIVE");
-			Elf32_Word B = (Elf32_Word) lib->pSMap;
-			Elf32_Word A = *P;
+
 			LOGM("P: %p, A: %04x, B: %04x, B + A: %04x", P, A, B, B + A);
-			*P = A + B;
-			LOGM("after: %04x", *P);
+
+			*P = B + A;
 			break;
+
 		default:
 			WHEN(1, _Fail_, "unsupported relocation type");
 	}
-
+	LOGM("after: %04x", *P);
 	LOG("-----------------------");
 
 	return 0;

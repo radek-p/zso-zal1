@@ -49,6 +49,8 @@ struct library {
 	void *(*pGetSym)(char const *);
 };
 
+void *libraryGetSymAll(struct library *lib, const char *name);
+
 struct library* initLibStruct(void *(*getsym)(char const *));
 
 int loadElfFile(struct library *lib, int fd);

@@ -3,7 +3,7 @@ project(zal1)
 
 # set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build64")
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99 -pedantic -Wall -Wextra -Wno-format")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -std=c99 -pedantic -Wall -Wextra -Wno-format")
 
 #set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -DDEBUG")
 
@@ -18,6 +18,21 @@ set(SOURCE_FILES
     ${LIB_SRC}
 )
 
+set(TEXTREL_SRC
+    tests/testtextrel.c
+)
+
+set(TEXTRELLIB_SRC
+    tests/textrel.c
+)
+
+add_library(textrel SHARED ${TEXTRELLIB_SRC})
+
+add_executable(testtextrel ${TEXTREL_SRC})
+
+
 add_executable(read_elf ${SOURCE_FILES})
 
 add_library(loader SHARED ${LIB_SRC})
+
+target_link_libraries(testtextrel loader)
