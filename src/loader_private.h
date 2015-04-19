@@ -61,8 +61,12 @@ int prepareMapInfo(struct library *lib);
 
 int doRelocations(struct library *lib);
 
+int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length);
+
 int relocate(struct library *lib, Elf32_Rel *rel);
 
 int prepareDynamicInfo(struct library *lib);
 
 int fileSize(int fd, off_t *size);
+
+int shouldIgnoreSymbol(Elf32_Sym *sym);

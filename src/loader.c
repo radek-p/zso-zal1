@@ -49,20 +49,24 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 		free(lib);
 
 	_Fail_:
+		LOGS("Failed");
 		return NULL;
 }
 
 void *library_getsym(struct library *lib, const char *name) {
 
-	lib = (void *) lib;
-	name = (void *) name;
 	for (size_t i = 0; i < lib->dtDynSymTabLength; ++i) {
 		Elf32_Sym *sym = &lib->dtSymTab[i];
+
+		if (shouldIgnoreSymbol(sym))
+			continue;
+
 		if (strcmp(name, &lib->dtStrTab[sym->st_name]) == 0) {
 			LOGM("found %s at address %p", name, (void *)(lib->pSMap + sym->st_value));
 			return lib->pSMap + sym->st_value;
 		}
 	}
+
 	return NULL;
 }
 
@@ -106,13 +110,12 @@ int loadElfFile(struct library *lib, int fd)
 
 	return 0;
 
-	_Fail_:
-		return 1;
-
 	_UnmapFile_:
 		// Do not check return value, we already have problems.
 		munmap(lib->pFile, (size_t) lib->uFileSize);
-		return 2;
+
+	_Fail_:
+		return 1;
 }
 
 int checkElfHeader(struct library *lib)
@@ -143,7 +146,6 @@ int mapSegments(struct library *lib, FILE *file)
 	int res = prepareMapInfo(lib);
 	WHEN(res != 0, _Fail_, "couldn't prepare to do mmap");
 
-	// TODO Change default protection level.
 	lib->pSMap = mmap(NULL, (size_t) lib->uSMapSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, (off_t) lib->uSMapSize);
 	WHEN(lib->pSMap == MAP_FAILED, _Fail_, "mmap failed");
 
@@ -165,7 +167,7 @@ int mapSegments(struct library *lib, FILE *file)
 
 		int protectionLevel = 0;
 		if (phdr->p_flags & PF_X) protectionLevel |= PROT_EXEC;
-		if (phdr->p_flags & PF_W) protectionLevel |= PROT_WRITE;
+		/*if (phdr->p_flags & PF_W)*/ protectionLevel |= PROT_WRITE; // TODO
 		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
 
 		void * res2 = mmap(lib->pSMap + minAligned, memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
@@ -173,8 +175,6 @@ int mapSegments(struct library *lib, FILE *file)
 
 		if (phdr->p_memsz > phdr->p_filesz) {
 			Elf32_Word sizeDiff = phdr->p_memsz - phdr->p_filesz;
-
-			// TODO error handling
 			memset(lib->pSMap + phdr->p_vaddr + phdr->p_filesz, 0x0, sizeDiff);
 
 			LOGM("p_memsz: %04x, p_filesz: %04x", phdr->p_memsz, phdr->p_filesz);
@@ -229,7 +229,6 @@ int prepareMapInfo(struct library *lib)
 
 int doRelocations(struct library *lib)
 {
-	LOGS("Finding dynamic info");
 
 	int res = prepareDynamicInfo(lib);
 	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
@@ -237,22 +236,18 @@ int doRelocations(struct library *lib)
 	if (lib->dtRel != NULL) {
 		LOGS("Performing DT_REL relocations");
 		size_t dtRelLength = lib->dtRelSz / sizeof(Elf32_Rel);
-		for (Elf32_Half i = 0; i < dtRelLength; ++i) {
-			res = relocate(lib, &lib->dtRel[i]);
-			WHEN(res != 0, _Fail_, "relocation failed");
-		}
+
+		res = doRelocationsFrom(lib, lib->dtRel, dtRelLength);
+		WHEN(res != 0, _Fail_, "couldnt perform DT_REL relocations");
 	}
 
 	if (lib->dtJmpRel != NULL)
 	{
 		LOGS("Performing DT_JMPREL relocations");
 		size_t dtJmpRelLength = lib->dtPltRelSz / sizeof(Elf32_Rel);
-		LOGM("relocations num: %zu", dtJmpRelLength);
-		for (Elf32_Half i = 0; i < dtJmpRelLength; ++i)
-		{
-			res = relocate(lib, &lib->dtJmpRel[i]);
-			WHEN(res != 0, _Fail_, "relocation failed");
-		}
+
+		res = doRelocationsFrom(lib, lib->dtJmpRel, dtJmpRelLength);
+		WHEN(res != 0, _Fail_, "couldnt perform DT_JMPREL relocations");
 	}
 
 	return 0;
@@ -261,8 +256,28 @@ int doRelocations(struct library *lib)
 		return 1;
 }
 
+int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length)
+{
+	for (Elf32_Half i = 0; i < length; ++i) {
+
+		Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(table[i].r_info)]; // TODO CHeck?
+		if (shouldIgnoreSymbol(sym)) {
+			LOG("relocation skipped");
+			continue;
+		}
+
+		int res = relocate(lib, &table[i]);
+		WHEN(res != 0, _Fail_, "relocation failed");
+	}
+	return 0;
+
+	_Fail_:
+		return 1;
+}
+
 int prepareDynamicInfo(struct library *lib)
 {
+	LOGS("Finding dynamic info");
 	// Find PT_DYNAMIC segment, fail if the number of that segments is not 1.
 	lib->pDyn = NULL;
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
@@ -293,7 +308,7 @@ int prepareDynamicInfo(struct library *lib)
 			case DT_HASH:     LOG("DT_HASH");
 				// The Oracle docs say that hash chain number is equal to dynsymtab length.
 				lib->dtDynSymTabLength = *((Elf32_Off *)(lib->pSMap + addr + 0x4));
-				LOGM("symtab length (from Hash): %04x", lib->dtDynSymTabLength);
+				LOGM("dynsymtab length (from Hash): %04x", lib->dtDynSymTabLength);
 				break;
 			// Assertions:
 			case DT_PLTREL:
@@ -318,72 +333,53 @@ int prepareDynamicInfo(struct library *lib)
 
 int relocate(struct library *lib, Elf32_Rel *rel)
 {
-	// TODO checks
-	Elf32_Half symIdx = (Elf32_Half) ELF32_R_SYM(rel->r_info);
-	Elf32_Sym *sym = &lib->dtSymTab[symIdx];
-
-	switch (ELF32_ST_TYPE(sym->st_info)) {
-		case STT_NOTYPE:
-			LOG("STT_NOTYPE");
-			break;
-		case STT_FUNC:
-			LOG("STT_FUNC");
-			break;
-		case STT_OBJECT:
-			LOG("STT_OBJECT");
-			break;
-		default:
-			LOG("IGNORED A SYMBOL!");
-			return 1;
-	}
-
-	LOGM("defined in section: %x", sym->st_shndx);
+	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO CHeck?
+	char *name = lib->dtStrTab + sym->st_name;
 
 	if (sym->st_shndx == SHN_UNDEF) {
-		LOGM("SHN_UNDEFINED, st_name: %x", sym->st_name);
-		LOGM("write: %s", lib->dtStrTab + sym->st_name);
-//		return 0;
+		LOGM("symbol \"%s\" defined in section: SHN_UNDEF", name);
+	} else {
+		LOGM("symbol \"%s\" defined in section: %x", name, sym->st_shndx);
 	}
 
-	if (sym->st_shndx >= SHN_LORESERVE) {
-		LOG("> SHN_LORESERVE");
-		return 1;
-	}
-
-	char *name = lib->dtStrTab + sym->st_name;
-	LOGM("relocating %p", (void *)name);
-//	LOGM("relocating %s", name);
-	LOGM("rel addr: %p", rel);
-
+	Elf32_Word *P = (Elf32_Word *)(lib->pSMap + rel->r_offset);
 	void * resSym;
 	switch (ELF32_R_TYPE(rel->r_info)) {
 		case R_386_32:
 			LOG("R_386_32");
+			LOGM("value: %04x", sym->st_value);
 			resSym = lib->pGetSym(name);
 			WHEN(resSym == NULL, _Fail_, "getSym failed");
-			*(void **)(lib->pSMap + rel->r_offset) = resSym;
+
+			*P = (Elf32_Word) resSym;
 			break;
 		case R_386_JMP_SLOT:
 			LOG("R_386_JMP_SLOT");
 			resSym = lib->pGetSym(name);
 			WHEN(resSym == NULL, _Fail_, "getSym failed");
-			*(void **)(lib->pSMap + rel->r_offset) = resSym;
+
+			*P = (Elf32_Word) resSym;
 			break;
 		case R_386_PC32:
 			LOG("R_386_PC32");
+//			Elf32_Addr S = sym->st_value;
 			break;
 		case R_386_GLOB_DAT:
 			LOG("R_386_GLOB_DAT");
 			break;
 		case R_386_RELATIVE:
 			LOG("R_386_RELATIVE");
+			Elf32_Word B = (Elf32_Word) lib->pSMap;
+			Elf32_Word A = *P;
+			LOGM("P: %p, A: %04x, B: %04x, B + A: %04x", P, A, B, B + A);
+			*P = A + B;
+			LOGM("after: %04x", *P);
 			break;
 		default:
-			LOG("unsupported relocation type");
-			return 1; //TODO
+			WHEN(1, _Fail_, "unsupported relocation type");
 	}
 
-	LOG("Finished");
+	LOG("-----------------------");
 
 	return 0;
 
@@ -405,4 +401,28 @@ int fileSize(int fd, off_t *size) {
 
 	_Fail_:
 		return 1;
+}
+
+int shouldIgnoreSymbol(Elf32_Sym *sym) {
+
+	if (sym->st_shndx != SHN_UNDEF     &&
+		sym->st_shndx != SHN_ABS       &&
+		sym->st_shndx >= SHN_LORESERVE &&
+		sym->st_shndx <= SHN_HIRESERVE
+	) {
+		LOG("ignored symbol due to its SHNDX");
+		return 1;
+	}
+
+	switch (ELF32_ST_TYPE(sym->st_info)) {
+		case STT_NOTYPE:
+		case STT_FUNC:
+		case STT_OBJECT:
+			break;
+		default:
+			LOG("ignored symbol due to its ST_TYPE");
+			return 1;
+	}
+
+	return 0;
 }
