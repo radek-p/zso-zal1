@@ -357,6 +357,10 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 		case R_386_JMP_SLOT:
 			LOG("NOT LAZY JUMP SLOT");
 
+
+
+//			break;
+
 		case R_386_GLOB_DAT:
 			LOG("R_386_GLOB_DAT");
 

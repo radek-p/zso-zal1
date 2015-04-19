@@ -9,7 +9,10 @@ set(LIB_SRC
     src/loader.h
     src/loader_private.h
     src/loader.c
+    src/lazy-resolve.s
 )
+
+set_property(SOURCE src/lazy-resolve.s PROPERTY LANGUAGE C)
 
 #set(SOURCE_FILES
 #    src/readElf.c
