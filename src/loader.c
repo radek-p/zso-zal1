@@ -10,6 +10,11 @@
 #include "debug.h"
 
 
+void test() {
+	LOG("HERE"); // TODO delete
+}
+
+
 struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	struct library *lib = initLibStruct(getsym);
@@ -254,6 +259,12 @@ int doRelocations(struct library *lib) {
 	if (lib->dtJmpRel != NULL)
 	{
 		LOGS("Performing DT_JMPREL relocations");
+		WHEN(lib->dtPltGot == NULL, _Fail_, "unable to fill in plt got");
+
+		// Fill in plt got slots for lazy symbol resolution
+		lib->dtPltGot[1] = (Elf32_Word) lib;
+		lib->dtPltGot[2] = (Elf32_Word) &outerLazyResolve;
+
 		size_t dtJmpRelLength = lib->dtPltRelSz / sizeof(Elf32_Rel);
 
 		res = doRelocationsFrom(lib, lib->dtJmpRel, dtJmpRelLength);
@@ -304,13 +315,14 @@ int prepareDynamicInfo(struct library *lib) {
 		Elf32_Word val  = pDyn->d_un.d_val;
 
 		switch (pDyn->d_tag) {
-			case DT_PLTRELSZ: LOG("DT_PLTRELSZ"); lib->dtPltRelSz = val;                               break;
-			case DT_RELSZ:    LOG("DT_RELSZ");    lib->dtRelSz    = val;                               break;
-			case DT_JMPREL:   LOG("DT_JMPREL");   lib->dtJmpRel   = (Elf32_Rel *) (lib->pSMap + addr); break;
-			case DT_REL:      LOG("DT_REL");      lib->dtRel      = (Elf32_Rel *) (lib->pSMap + addr); break;
-			case DT_SYMTAB:   LOG("DT_SYMTAB");   lib->dtSymTab   = (Elf32_Sym *) (lib->pSMap + addr); break;
-			case DT_PLTGOT:   LOG("DT_PLTGOT");   lib->dtPltGot   = lib->pSMap + addr;                 break;
-			case DT_STRTAB:   LOG("DT_STRTAB");   lib->dtStrTab   = lib->pSMap + addr;                 break;
+			// Initializations:
+			case DT_PLTRELSZ: LOG("DT_PLTRELSZ"); lib->dtPltRelSz = val;                                break;
+			case DT_RELSZ:    LOG("DT_RELSZ");    lib->dtRelSz    = val;                                break;
+			case DT_JMPREL:   LOG("DT_JMPREL");   lib->dtJmpRel   = (Elf32_Rel  *) (lib->pSMap + addr); break;
+			case DT_REL:      LOG("DT_REL");      lib->dtRel      = (Elf32_Rel  *) (lib->pSMap + addr); break;
+			case DT_SYMTAB:   LOG("DT_SYMTAB");   lib->dtSymTab   = (Elf32_Sym  *) (lib->pSMap + addr); break;
+			case DT_PLTGOT:   LOG("DT_PLTGOT");   lib->dtPltGot   = (Elf32_Word *) (lib->pSMap + addr); break;
+			case DT_STRTAB:   LOG("DT_STRTAB");   lib->dtStrTab   = lib->pSMap + addr;                  break;
 			case DT_HASH:     LOG("DT_HASH");
 				// The Oracle docs say that hash chain number is equal to dynsymtab length.
 				lib->dtDynSymTabLength = *((Elf32_Off *)(lib->pSMap + addr + 0x4));
@@ -318,15 +330,10 @@ int prepareDynamicInfo(struct library *lib) {
 				break;
 
 			// Assertions:
-			case DT_PLTREL:
-				WHEN(val != DT_REL, _Fail_, "unsupported DT_PLTREL value");
-				break;
-			case DT_RELENT:
-				WHEN(val != 0x08, _Fail_, "unsupported DT_RELENT");
-				break;
-			case DT_SYMENT:
-				WHEN(val != 0x10, _Fail_, "unsupported DT_SYMENT");
-				break;
+			case DT_PLTREL: WHEN(val != DT_REL, _Fail_, "unsupported DT_PLTREL value"); break;
+			case DT_RELENT: WHEN(val != 0x08,   _Fail_, "unsupported DT_RELENT");       break;
+			case DT_SYMENT: WHEN(val != 0x10,   _Fail_, "unsupported DT_SYMENT");       break;
+
 			default:
 				LOG("unknown symbol DT_*");
 				break;
@@ -369,11 +376,11 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 	}
 
 	switch (type) {
-		case R_386_JMP_SLOT: LOG("NOT LAZY JUMP SLOT"); // TODO break;
-		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT"); *P = S;                  break;
-		case R_386_32:       LOG("R_386_32");       *P = S + A;              break;
-		case R_386_PC32:     LOG("R_386_PC32");     *P = S + A - (size_t) P; break;
-		case R_386_RELATIVE: LOG("R_386_RELATIVE"); *P = B + A;              break;
+		case R_386_JMP_SLOT: LOG("LAZY???? JUMP SLOT"); *P = B + A;              break;
+		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT");     *P = S;                  break;
+		case R_386_32:       LOG("R_386_32");           *P = S + A;              break;
+		case R_386_PC32:     LOG("R_386_PC32");         *P = S + A - (size_t) P; break;
+		case R_386_RELATIVE: LOG("R_386_RELATIVE");     *P = B + A;              break;
 
 		default: LOG("unsupported relocation type"); return 1;
 	}
@@ -388,7 +395,7 @@ void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
 
 	LOGM("lazy resolution: lib: %p, relOffset: %04x", lib, relOffset);
 
-	return NULL;
+	return &test;
 }
 
 int fileSize(int fd, off_t *size) {
@@ -430,6 +437,9 @@ int shouldIgnoreSymbol(Elf32_Sym *sym) {
 }
 
 int fixPermissions(struct library *lib) {
+
+	LOGS("Fixing segment access premissions");
+
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
 
 		Elf32_Phdr *phdr = &lib->pPhdrs[i];

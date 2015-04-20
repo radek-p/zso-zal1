@@ -36,8 +36,8 @@ struct library {
 
 	// Info form PT_DYNAMIC segment
 	Elf32_Word dtPltRelSz;
-	Elf32_Rel *dtJmpRel;
-	void *dtPltGot;
+	Elf32_Rel  *dtJmpRel;
+	Elf32_Word *dtPltGot;
 	char *dtStrTab;
 	Elf32_Sym *dtSymTab;
 	Elf32_Rel *dtRel;
@@ -65,6 +65,8 @@ int doRelocations(struct library *lib);
 int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length);
 
 int relocate(struct library *lib, Elf32_Rel *rel);
+
+extern void outerLazyResolve();
 
 void *lazyResolve(struct library *lib, Elf32_Addr relOffset);
 
