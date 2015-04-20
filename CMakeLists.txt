@@ -20,16 +20,16 @@ set_property(SOURCE src/lazy-resolve.s PROPERTY LANGUAGE C)
 #)
 #add_executable(read_elf ${SOURCE_FILES})
 
-#set(TEXTRELLIB_SRC
-#    tests/textrel.c
-#)
-#add_library(textrel SHARED ${TEXTRELLIB_SRC})
+set(TEXTRELLIB_SRC
+    tests/textrel.c
+)
+add_library(textrel SHARED ${TEXTRELLIB_SRC})
 
-#set(TEXTREL_SRC
-#    tests/testtextrel.c
-#)
-#add_executable(testtextrel ${TEXTREL_SRC})
-#target_link_libraries(testtextrel loader)
+set(TEXTREL_SRC
+    tests/testtextrel.c
+)
+add_executable(testtextrel ${TEXTREL_SRC})
+target_link_libraries(testtextrel loader)
 
 add_definitions("-DDEBUG")
 add_library(loader SHARED ${LIB_SRC})

@@ -10,11 +10,6 @@
 #include "debug.h"
 
 
-void test() {
-	LOG("HERE"); // TODO delete
-}
-
-
 struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	struct library *lib = initLibStruct(getsym);
@@ -278,8 +273,8 @@ int doRelocations(struct library *lib) {
 }
 
 int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length) {
-	for (Elf32_Half i = 0; i < length; ++i) {
 
+	for (Elf32_Half i = 0; i < length; ++i) {
 		Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(table[i].r_info)]; // TODO CHeck?
 		if (shouldIgnoreSymbol(sym)) {
 			LOG("relocation skipped");
@@ -352,8 +347,6 @@ int prepareDynamicInfo(struct library *lib) {
 
 int relocate(struct library *lib, Elf32_Rel *rel) {
 
-	LOGM("lig: %p", (void *) lib);
-
 	Elf32_Sym *sym  = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO Check?
 	char *name      = lib->dtStrTab + sym->st_name;
 	Elf32_Word *P   = (Elf32_Word *)(lib->pSMap + rel->r_offset);
@@ -378,11 +371,11 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 	}
 
 	switch (type) {
-		case R_386_JMP_SLOT: LOG("LAZY???? JUMP SLOT"); *P = B + A;              break;
-		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT");     *P = S;                  break;
-		case R_386_32:       LOG("R_386_32");           *P = S + A;              break;
-		case R_386_PC32:     LOG("R_386_PC32");         *P = S + A - (size_t) P; break;
-		case R_386_RELATIVE: LOG("R_386_RELATIVE");     *P = B + A;              break;
+		case R_386_JMP_SLOT: LOG("R_386JUMP SLOT"); *P = B + A;                  break;
+		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT"); *P = S;                      break;
+		case R_386_32:       LOG("R_386_32");       *P = S + A;                  break;
+		case R_386_PC32:     LOG("R_386_PC32");     *P = S + A - (Elf32_Addr) P; break;
+		case R_386_RELATIVE: LOG("R_386_RELATIVE"); *P = B + A;                  break;
 
 		default: LOG("unsupported relocation type"); return 1;
 	}

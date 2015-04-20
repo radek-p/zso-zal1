@@ -48,6 +48,8 @@ struct library {
 	void *(*pGetSym)(char const *);
 };
 
+#pragma GCC visibility push(hidden)
+
 void *libraryGetSymAll(struct library *lib, const char *name);
 
 struct library* initLibStruct(void *(*getsym)(char const *));
@@ -80,3 +82,5 @@ int fixPermissions(struct library *lib);
 
 void align(struct library *lib, Elf32_Phdr *phdr, Elf32_Addr *minAligned,
 		   Elf32_Off *memSzAligned, Elf32_Off *fileOffset);
+
+#pragma GCC visibility pop
