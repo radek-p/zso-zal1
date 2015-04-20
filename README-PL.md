@@ -1,2 +1,0 @@
-## Zadanie zaliczeniowe 1
-

@@ -14,8 +14,10 @@ set(LIB_SRC
 set_property(SOURCE lazy-resolve.s PROPERTY LANGUAGE C)
 
 # these flags are used in debug.h
-#add_definitions("-DHITTEST=35")
+
+# Uncomment to turn on debug messages
 #add_definitions("-DDEBUG_MESSAGES")
+#add_definitions("-DHITTEST=35")
 
 # target libloader.so:
 add_library(loader SHARED ${LIB_SRC})
@@ -26,21 +28,3 @@ set(TEST_SRC
 )
 
 add_executable(run_test ${TEST_SRC})
-#include_directories(run_test PUBLIC .)
-
-
-# The testtextrel test and other tests can
-# be added to CMake project like this:
-
-# Test library
-#set(TEXTRELLIB_SRC
-#    tests/textrel.c
-#)
-#add_library(textrel SHARED ${TEXTRELLIB_SRC})
-
-# Test executable
-#set(TEXTREL_SRC
-#    tests/testtextrel.c
-#)
-#add_executable(testtextrel ${TEXTREL_SRC})
-#target_link_libraries(testtextrel loader)

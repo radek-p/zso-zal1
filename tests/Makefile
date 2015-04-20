@@ -21,5 +21,6 @@ clean:
 	rm -f *.o $(addprefix test,$(TESTS)) $(addsuffix .so,$(TESTS))
 
 libloader.so: ../loader.h ../loader.c ../debug.h ../loader_private.h ../lazy-resolve.s
-	cd ../build && $(MAKE)
+	mkdir -p ../build
+	cd ../build && cmake .. && $(MAKE)
 	ln -sf ../build/libloader.so libloader.so

@@ -8,12 +8,6 @@
 
 // Struct describing a handle for a dynamic library
 struct library {
-	// Pointer to the whole Elf file mapped into memory.
-//	char *pFile;
-
-	// Elf file size.
-//	Elf32_Off uFileSize;
-
 	// Libraty's segments mapping.
 	char *pSMap;
 
