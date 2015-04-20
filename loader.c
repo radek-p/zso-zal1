@@ -353,9 +353,10 @@ int prepareDynamicInfo(struct library *lib) {
 
 int relocate(struct library *lib, Elf32_Rel *rel) {
 
-	Elf32_Sym *sym  = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO Check?
+	Elf32_Sym *sym  = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)];
 	char *name      = lib->dtStrTab + sym->st_name;
 	Elf32_Word *P   = (Elf32_Word *)(lib->pSMap + rel->r_offset);
+	Elf32_Addr PP   = (Elf32_Addr) P;
 	Elf32_Word A    = *P;
 	Elf32_Word B    = (Elf32_Word) lib->pSMap;
 	Elf32_Addr S    = 0;
@@ -377,13 +378,13 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 	}
 
 	switch (type) {
-		case R_386_JMP_SLOT: LOG("R_386JUMP SLOT"); *P = B + A;                  break;
-		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT"); *P = S;                      break;
-		case R_386_32:       LOG("R_386_32");       *P = S + A;                  break;
-		case R_386_PC32:     LOG("R_386_PC32");     *P = S + A - (Elf32_Addr) P; break;
-		case R_386_RELATIVE: LOG("R_386_RELATIVE"); *P = B + A;                  break;
+		case R_386_JMP_SLOT: LOG("R_386JUMP SLOT"); *P = B + A;      break;
+		case R_386_GLOB_DAT: LOG("R_386_GLOB_DAT"); *P = S;          break;
+		case R_386_32:       LOG("R_386_32");       *P = S + A;      break;
+		case R_386_PC32:     LOG("R_386_PC32");     *P = S + A - PP; break;
+		case R_386_RELATIVE: LOG("R_386_RELATIVE"); *P = B + A;      break;
 
-		default: LOG("unsupported relocation type"); return 1;
+		default: ERR("unsupported relocation type"); return 1;
 	}
 
 	LOGM("after: %04x", *P);
@@ -436,6 +437,10 @@ int fileSize(int fd, off_t *size) {
 
 int shouldIgnoreSymbol(Elf32_Sym *sym) {
 
+	// SHN_HIRESERVE is 0xffffff, so compiler complains
+	// about unnecessary comparison. Silence that warn:
+#pragma GCC diagnostic ignored "-Wtype-limits"
+
 	if (sym->st_shndx != SHN_UNDEF     &&
 		sym->st_shndx != SHN_ABS       &&
 		sym->st_shndx >= SHN_LORESERVE &&
@@ -444,6 +449,8 @@ int shouldIgnoreSymbol(Elf32_Sym *sym) {
 		LOG("ignored symbol due to its SHNDX");
 		return 1;
 	}
+
+#pragma GCC diagnostic pop
 
 	switch (ELF32_ST_TYPE(sym->st_info)) {
 		case STT_NOTYPE:

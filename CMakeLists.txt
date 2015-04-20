@@ -4,13 +4,14 @@ project(zal1)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32 -std=c99 -pedantic -Wall -Wextra")
 
 set(LIB_SRC
-    src/loader.h
-    src/loader_private.h
-    src/loader.c
-    src/lazy-resolve.s
+    loader.h
+    loader_private.h
+    debug.h
+    loader.c
+    lazy-resolve.s
 )
 
-set_property(SOURCE src/lazy-resolve.s PROPERTY LANGUAGE C)
+set_property(SOURCE lazy-resolve.s PROPERTY LANGUAGE C)
 
 # these flags are used in debug.h
 #add_definitions("-DHITTEST=35")
@@ -18,6 +19,14 @@ set_property(SOURCE src/lazy-resolve.s PROPERTY LANGUAGE C)
 
 # target libloader.so:
 add_library(loader SHARED ${LIB_SRC})
+
+#set(TEST_SRC
+#    ../test/run_test.c
+#    ${LIB_SRC}
+#)
+
+#add_executable(run_test ${TEST_SRC})
+#target_include_directories(run_test PUBLIC src)
 
 
 # The testtextrel test and other tests can
