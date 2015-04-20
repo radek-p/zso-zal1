@@ -89,6 +89,13 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 	struct library *lib = malloc(sizeof(struct library));
 	WHEN(lib == NULL, _Fail_, "malloc failed");
 
+	// Empty dynamic info
+	lib->dtRel    = lib->dtJmpRel = NULL;
+	lib->dtPltGot = NULL;
+	lib->dtStrTab = NULL;
+	lib->dtSymTab = NULL;
+	lib->dtRelSz = lib->dtPltRelSz = lib->dtDynSymTabLength = 0;
+
 	lib->pGetSym = getsym;
 	return lib;
 
@@ -290,8 +297,6 @@ int prepareDynamicInfo(struct library *lib) {
 	}
 	WHEN(lib->pDyn == NULL, _Fail_, "failed to find PT_DYNAMIC segment");
 
-	lib->dtRel = lib->dtJmpRel = NULL;
-
 	size_t uDynLength = lib->uDynSize / (sizeof(Elf32_Dyn));
 	for (size_t i = 0; i < uDynLength && lib->pDyn[i].d_tag != DT_NULL; ++i) {
 		Elf32_Dyn *pDyn = &lib->pDyn[i];
@@ -300,17 +305,18 @@ int prepareDynamicInfo(struct library *lib) {
 
 		switch (pDyn->d_tag) {
 			case DT_PLTRELSZ: LOG("DT_PLTRELSZ"); lib->dtPltRelSz = val;                               break;
+			case DT_RELSZ:    LOG("DT_RELSZ");    lib->dtRelSz    = val;                               break;
 			case DT_JMPREL:   LOG("DT_JMPREL");   lib->dtJmpRel   = (Elf32_Rel *) (lib->pSMap + addr); break;
+			case DT_REL:      LOG("DT_REL");      lib->dtRel      = (Elf32_Rel *) (lib->pSMap + addr); break;
+			case DT_SYMTAB:   LOG("DT_SYMTAB");   lib->dtSymTab   = (Elf32_Sym *) (lib->pSMap + addr); break;
 			case DT_PLTGOT:   LOG("DT_PLTGOT");   lib->dtPltGot   = lib->pSMap + addr;                 break;
 			case DT_STRTAB:   LOG("DT_STRTAB");   lib->dtStrTab   = lib->pSMap + addr;                 break;
-			case DT_SYMTAB:   LOG("DT_SYMTAB");   lib->dtSymTab   = (Elf32_Sym *) (lib->pSMap + addr); break;
-			case DT_REL:      LOG("DT_REL");      lib->dtRel      = (Elf32_Rel *) (lib->pSMap + addr); break;
-			case DT_RELSZ:    LOG("DT_RELSZ");    lib->dtRelSz    = val;                               break;
 			case DT_HASH:     LOG("DT_HASH");
 				// The Oracle docs say that hash chain number is equal to dynsymtab length.
 				lib->dtDynSymTabLength = *((Elf32_Off *)(lib->pSMap + addr + 0x4));
 				LOGM("dynsymtab length (from Hash): %04x", lib->dtDynSymTabLength);
 				break;
+
 			// Assertions:
 			case DT_PLTREL:
 				WHEN(val != DT_REL, _Fail_, "unsupported DT_PLTREL value");
@@ -326,6 +332,11 @@ int prepareDynamicInfo(struct library *lib) {
 				break;
 		}
 	}
+
+	WHEN(lib->dtSymTab == NULL, _Fail_, "symbol table not found");
+	WHEN(lib->dtStrTab == NULL, _Fail_, "string table not found");
+	WHEN(lib->dtJmpRel == NULL && lib->dtPltRelSz != 0, _Fail_, "inconsistent sizes");
+	WHEN(lib->dtRel    == NULL && lib->dtRelSz    != 0, _Fail_, "inconsistent sizes");
 	return 0;
 
 	_Fail_:
