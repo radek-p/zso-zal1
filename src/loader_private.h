@@ -1,7 +1,7 @@
 #pragma once
 
+#define _GNU_SOURCE
 #include <elf.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 

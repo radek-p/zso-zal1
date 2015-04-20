@@ -1,13 +1,13 @@
-#define _GNU_SOURCE
-#include <elf.h>
+#include "loader.h"
+#include "loader_private.h"
+#include "debug.h"
+
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <string.h>
-#include <stdio.h>
-#include "loader.h"
-#include "loader_private.h"
-#include "debug.h"
+#include <stdlib.h>
+#include <errno.h>
 
 
 struct library *library_load(const char *name, void *(*getsym)(char const *)) {
@@ -39,20 +39,26 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 
 	_UnmapSegments_:
 		file = NULL;
+		LOG("unmapping library's segments");
 		munmap(lib->pSMap, (size_t) lib->uSMapSize);
 
 	_UnmapFile_:
+		LOG("unmapping library file");
 		munmap(lib->pFile, (size_t) lib->uFileSize);
 
 	_CloseFd_:
-		if (file != NULL)
+		if (file != NULL) {
+			LOG("closing file descriptor");
 			fclose(file);
+		}
 
 	_FreeLib_:
+		LOG("deallocating lib struct");
 		free(lib);
 
 	_Fail_:
-		LOGS("Failed");
+		LOGS("load failed");
+		errno = EINVAL;
 		return NULL;
 }
 
