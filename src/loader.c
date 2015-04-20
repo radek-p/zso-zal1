@@ -344,16 +344,17 @@ int prepareDynamicInfo(struct library *lib) {
 }
 
 int relocate(struct library *lib, Elf32_Rel *rel) {
-	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO CHeck?
-	char *name = lib->dtStrTab + sym->st_name;
+
+	Elf32_Sym *sym  = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO Check?
+	char *name      = lib->dtStrTab + sym->st_name;
+	Elf32_Word *P   = (Elf32_Word *)(lib->pSMap + rel->r_offset);
+	Elf32_Word A    = *P;
+	Elf32_Word B    = (Elf32_Word) lib->pSMap;
+	Elf32_Addr S    = 0;
+	Elf32_Word type = ELF32_R_TYPE(rel->r_info);
 
 	LOGM("> relocating symbol \"%s\" (defined in section: %x)", name, sym->st_shndx);
-
-	Elf32_Word *P = (Elf32_Word *)(lib->pSMap + rel->r_offset);
-	Elf32_Word A = *P;
-	Elf32_Word B = (Elf32_Word) lib->pSMap;
-	Elf32_Addr S = 0;
-	Elf32_Word type = ELF32_R_TYPE(rel->r_info);
+	LOGM("P: %p, A: %04x, B: %04x", P, A, B);
 
 	if (type == R_386_JMP_SLOT ||
 		type == R_386_GLOB_DAT ||
@@ -361,10 +362,11 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 		type == R_386_PC32
 	) {
 		S = (Elf32_Word) libraryGetSymAll(lib, name);
-		WHEN(S == (Elf32_Word) NULL, _Fail_, "cannot find symbol");
+		if (S == (Elf32_Word) NULL) {
+			LOGM("cannot find symbol \"%s\"", name);
+			return 1;
+		}
 	}
-
-	LOGM("P: %p, A: %04x, B: %04x", P, A, B);
 
 	switch (type) {
 		case R_386_JMP_SLOT: LOG("NOT LAZY JUMP SLOT"); // TODO break;
@@ -373,17 +375,13 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 		case R_386_PC32:     LOG("R_386_PC32");     *P = S + A - (size_t) P; break;
 		case R_386_RELATIVE: LOG("R_386_RELATIVE"); *P = B + A;              break;
 
-		default:
-			WHEN(1, _Fail_, "unsupported relocation type");
+		default: LOG("unsupported relocation type"); return 1;
 	}
 
 	LOGM("after: %04x", *P);
 	LOG("-----------------------");
 
 	return 0;
-
-	_Fail_:
-		return 1;
 }
 
 void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
