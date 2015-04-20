@@ -9,15 +9,11 @@ outerLazyResolve:
     pushl %ecx
     pushl %edx
 
-   pushl 16(%esp)
-   pushl 12(%esp)
-
-#    pushl %edx
-#    pushl %eax
+    pushl 16(%esp)
+    pushl 16(%esp)
 
     call lazyResolve        # Call resolver.
     add $8, %esp
-
 
     movl %eax, 16(%esp)
     popl %edx

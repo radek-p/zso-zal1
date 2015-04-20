@@ -352,6 +352,8 @@ int prepareDynamicInfo(struct library *lib) {
 
 int relocate(struct library *lib, Elf32_Rel *rel) {
 
+	LOGM("lig: %p", (void *) lib);
+
 	Elf32_Sym *sym  = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO Check?
 	char *name      = lib->dtStrTab + sym->st_name;
 	Elf32_Word *P   = (Elf32_Word *)(lib->pSMap + rel->r_offset);
@@ -363,7 +365,7 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 	LOGM("> relocating symbol \"%s\" (defined in section: %x)", name, sym->st_shndx);
 	LOGM("P: %p, A: %04x, B: %04x", P, A, B);
 
-	if (type == R_386_JMP_SLOT ||
+	if (
 		type == R_386_GLOB_DAT ||
 		type == R_386_32       ||
 		type == R_386_PC32
@@ -393,9 +395,24 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 
 void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
 
-	LOGM("lazy resolution: lib: %p, relOffset: %04x", lib, relOffset);
+	LOGM("lazy resolution: lib: %p, relOffset: %x, jumprel: %p", lib, relOffset, lib->dtJmpRel);
 
-	return &test;
+	Elf32_Rel *rel = &lib->dtJmpRel[relOffset / sizeof(Elf32_Rel)];
+
+	LOGM("found rel: %p", rel);
+
+	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)];
+	char *name = lib->dtStrTab + sym->st_name;
+
+	void *res = lib->pGetSym(name);
+	*(Elf32_Word *)(lib->pSMap + rel->r_offset) = (Elf32_Word) res;
+
+	LOGM("Found address: %d", res);
+
+	if (res == NULL)
+		LOG("Failed to resolve lazy symbol");
+
+	return res;
 }
 
 int fileSize(int fd, off_t *size) {
