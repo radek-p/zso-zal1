@@ -18,6 +18,8 @@ int test_align() {
 	align(&lib, &phdr, &min, &size, &offset);
 	assert(min == 0x0 && size == 0x2000 && offset == 0x0);
 
+	// TODO more tests
+
 	return 0;
 }
 

@@ -9,10 +9,10 @@
 // Struct describing a handle for a dynamic library
 struct library {
 	// Pointer to the whole Elf file mapped into memory.
-	char *pFile;
+//	char *pFile;
 
 	// Elf file size.
-	Elf32_Off uFileSize;
+//	Elf32_Off uFileSize;
 
 	// Libraty's segments mapping.
 	char *pSMap;
@@ -55,7 +55,7 @@ void *libraryGetSymAll(struct library *lib, const char *name);
 
 struct library* initLibStruct(void *(*getsym)(char const *));
 
-int loadElfFile(struct library *lib, int fd);
+int loadElfFile(struct library *lib, FILE *file);
 
 int checkElfHeader(struct library *lib);
 
@@ -83,5 +83,7 @@ int fixPermissions(struct library *lib);
 
 void align(struct library *lib, Elf32_Phdr *phdr, Elf32_Addr *minAligned,
 		   Elf32_Off *memSzAligned, Elf32_Off *fileOffset);
+
+char *mallocAndRead(FILE *file, size_t fileSize, size_t fileOffset, size_t length);
 
 #pragma GCC visibility pop

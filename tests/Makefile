@@ -1,5 +1,5 @@
 TESTS = addsub hello var ptr lazy textrel regparm
-all: $(addprefix test,$(TESTS)) loader
+all: $(addprefix test,$(TESTS)) libloader.so
 COMMON_C_FLAGS = -g
 .PRECIOUS: %.so
 
@@ -20,7 +20,6 @@ call-%:
 clean:
 	rm -f *.o $(addprefix test,$(TESTS)) $(addsuffix .so,$(TESTS))
 
-.PHONY: loader
-
-loader: 
+libloader.so: ../loader.h ../loader.c ../debug.h ../loader_private.h ../lazy-resolve.s
 	cd ../build && $(MAKE)
+	ln -sf ../build/libloader.so libloader.so

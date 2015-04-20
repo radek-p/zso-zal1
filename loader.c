@@ -18,11 +18,11 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	FILE *file = fopen(name, "r");
 	WHEN(file == NULL, _FreeLib_, "open failed");
 
-	int res = loadElfFile(lib, fileno(file));
+	int res = loadElfFile(lib, file);
 	WHEN(res != 0, _CloseFd_, "failed to load Elf file");
 
 	res = mapSegments(lib, file);
-	WHEN(res != 0, _UnmapFile_, "failed to map program segments");
+	WHEN(res != 0, _FreeElfInfo_, "failed to map program segments");
 
 	res = fclose(file);
 	WHEN(res != 0, _UnmapSegments_, "failed to close elf file");
@@ -42,9 +42,10 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 		LOG("unmapping library's segments");
 		munmap(lib->pSMap, (size_t) lib->uSMapSize);
 
-	_UnmapFile_:
-		LOG("unmapping library file");
-		munmap(lib->pFile, (size_t) lib->uFileSize);
+	_FreeElfInfo_:
+		LOG("freeing elf info (elf header and program header table)");
+		free(lib->pEhdr);
+		free(lib->pPhdrs);
 
 	_CloseFd_:
 		if (file != NULL) {
@@ -112,41 +113,38 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 		return NULL;
 }
 
-int loadElfFile(struct library *lib, int fd) {
+int loadElfFile(struct library *lib, FILE *file) {
 	LOGS("Mapping elf file to memory");
 
-	off_t size;
-	int res = fileSize(fd, &size);
+	off_t elfSize;
+	int res = fileSize(fileno(file), &elfSize);
 	WHEN(res != 0, _Fail_, "fileSize failed");
-	WHEN(size < 0, _Fail_, "invalid file size");
+	WHEN(elfSize < 0, _Fail_, "invalid file size");
+	WHEN(elfSize < (sizeof(Elf32_Ehdr)), _Fail_, "file too small for elf header");
 
-	lib->uFileSize = (Elf32_Off) size;
-
-	lib->pFile = mmap(NULL, (size_t) lib->uFileSize, PROT_READ, MAP_PRIVATE, fd, 0);
-	WHEN(lib->pFile == MAP_FAILED, _Fail_, "mmap failed");
-
-	lib->pEhdr = (Elf32_Ehdr *) lib->pFile;
+	lib->pEhdr = (Elf32_Ehdr *) mallocAndRead(file, (size_t) elfSize, 0, sizeof(Elf32_Ehdr));
+	WHEN(lib->pEhdr == NULL, _Fail_, "failed to read elf header");
 
 	res = checkElfHeader(lib);
-	WHEN(res != 0, _UnmapFile_, "invalid file format");
+	WHEN(res != 0, _FreeHeader_, "invalid file format");
 
-	Elf32_Off phdrsOffset = lib->pEhdr->e_phoff + lib->pEhdr->e_phentsize * lib->pEhdr->e_phnum;
-	WHEN(phdrsOffset > lib->uFileSize, _UnmapFile_, "file too small for program header table");
+	Elf32_Off phdrsLength = lib->pEhdr->e_phentsize * lib->pEhdr->e_phnum;
+	Elf32_Off phdrsOffset = lib->pEhdr->e_phoff + phdrsLength;
+	WHEN(phdrsOffset > elfSize, _FreeHeader_, "file too small for program header table");
 
-	lib->pPhdrs = (Elf32_Phdr *) (lib->pFile + lib->pEhdr->e_phoff);
+	lib->pPhdrs = (Elf32_Phdr *) mallocAndRead(file, (size_t) elfSize, lib->pEhdr->e_phoff, phdrsLength);
+	WHEN(lib->pPhdrs == NULL, _FreeHeader_, "failed to read elf program header table");
 
 	return 0;
 
-	_UnmapFile_:
-		// Do not check return value, we already have problems.
-		munmap(lib->pFile, (size_t) lib->uFileSize);
+	_FreeHeader_:
+		free(lib->pEhdr);
 
 	_Fail_:
 		return 1;
 }
 
 int checkElfHeader(struct library *lib) {
-	WHEN(lib->uFileSize < (sizeof(Elf32_Ehdr)), _Fail_, "file too small for elf header");
 
 	for (int i = 0; i < SELFMAG; ++i)
 		WHEN(lib->pEhdr->e_ident[i] != ELFMAG[i], _Fail_, "wrong magic number");
@@ -363,7 +361,7 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 	Elf32_Word type = ELF32_R_TYPE(rel->r_info);
 
 	LOGM("> relocating symbol \"%s\" (defined in section: %x)", name, sym->st_shndx);
-	LOGM("P: %p, A: %04x, B: %04x", P, A, B);
+	LOGM("P: %p, A: %04x, B: %04x", (void *) P, A, B);
 
 	if (
 		type == R_386_GLOB_DAT ||
@@ -395,11 +393,11 @@ int relocate(struct library *lib, Elf32_Rel *rel) {
 
 void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
 
-	LOGM("lazy resolution: lib: %p, relOffset: %x, jumprel: %p", lib, relOffset, lib->dtJmpRel);
+	LOGM("lazy resolution: lib: %p, relOffset: %x, jumprel: %p", (void *) lib, relOffset, (void *) lib->dtJmpRel);
 
 	Elf32_Rel *rel = &lib->dtJmpRel[relOffset / sizeof(Elf32_Rel)];
 
-	LOGM("found rel: %p", rel);
+	LOGM("found rel: %p", (void *) rel);
 
 	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)];
 	char *name = lib->dtStrTab + sym->st_name;
@@ -503,4 +501,27 @@ void align(struct library *lib, Elf32_Phdr *phdr, Elf32_Addr *minAligned, Elf32_
 
 	LOGM("base addr: %p", (void *) (lib->pSMap + *minAligned));
 	LOGM("after align: begin: %x, size: %x, file offset: %x", *minAligned, *memSzAligned, *fileOffset);
+}
+
+char *mallocAndRead(FILE *file, size_t fileSize, size_t fileOffset, size_t length) {
+
+	WHEN(fileSize < fileOffset + length, _Fail_, "file too small");
+
+	int res = fseeko(file, fileOffset, SEEK_SET);
+	WHEN(res != 0, _Fail_, "fseeko failed");
+
+	char *tmp = malloc(length);
+	WHEN(tmp == NULL, _Fail_, "malloc failed");
+
+	size_t bytesRead = fread(tmp, 1, length, file);
+	LOGM("bytes read: %zu, requested length: %zu", bytesRead, sizeof(Elf32_Ehdr));
+	WHEN(bytesRead != length, _FreeBuffer_, "fread failed");
+
+	return tmp;
+
+	_FreeBuffer_:
+		free(tmp);
+
+	_Fail_:
+		return NULL;
 }
