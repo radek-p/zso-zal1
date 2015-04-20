@@ -85,7 +85,10 @@ void *libraryGetSymAll(struct library *lib, const char *name) {
 	if (sym != NULL)
 		return sym;
 
-	return lib->pGetSym(name);
+	if (lib->pGetSym != NULL)
+		return lib->pGetSym(name);
+
+	return NULL;
 }
 
 struct library *initLibStruct(void *(*getsym)(char const *)) {
@@ -281,11 +284,8 @@ int doRelocations(struct library *lib) {
 int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length) {
 
 	for (Elf32_Half i = 0; i < length; ++i) {
-		Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(table[i].r_info)]; // TODO CHeck?
-		if (shouldIgnoreSymbol(sym)) {
-			LOG("relocation skipped");
-			continue;
-		}
+		Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(table[i].r_info)];
+		WHEN(shouldIgnoreSymbol(sym), _Fail_, "relocation of unsupported symbol");
 
 		int res = relocate(lib, &table[i]);
 		WHEN(res != 0, _Fail_, "relocation failed");
@@ -403,13 +403,19 @@ void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
 	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)];
 	char *name = lib->dtStrTab + sym->st_name;
 
-	void *res = lib->pGetSym(name);
+	void *res = NULL;
+	if (lib->pGetSym != NULL)
+		res = lib->pGetSym(name);
+
+	// Place the resolved address in the GOT table
 	*(Elf32_Word *)(lib->pSMap + rel->r_offset) = (Elf32_Word) res;
 
-	LOGM("Found address: %d", res);
+	LOGM("Found address: %p", res);
 
-	if (res == NULL)
-		LOG("Failed to resolve lazy symbol");
+	if (res == NULL) {
+		ERR("failed to resolve lazy symbol");
+		exit(1);
+	}
 
 	return res;
 }

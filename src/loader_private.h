@@ -5,9 +5,9 @@
 #include <stdio.h>
 
 
-// Struct describing handle for a dynamic library
+// Struct describing a handle for a dynamic library
 struct library {
-	// Whole Elf file mapped to memory.
+	// Pointer to the whole Elf file mapped into memory.
 	char *pFile;
 
 	// Elf file size.
