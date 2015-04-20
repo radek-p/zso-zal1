@@ -1,0 +1,14 @@
+Obsługa:
+ - umieścić lub podlinkować libloader.so w katalogu test/
+ - wykonać make test
+
+Punktacja za testy to:
+ - 1.75 punkta za addsub
+ - 1.75 punkta za hello
+ - 1.75 punkta za var
+ - 1.75 punkta za ptr
+ - 1.75 punkta za textrel
+ - 1.75 punkta za regparm
+ - 2 punkty za lazy wykonane faktycznie w wersji lazy
+
+Punktacja za zadanie = punktacja za testy - kary za błędy w kodzie
