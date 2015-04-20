@@ -73,3 +73,8 @@ int prepareDynamicInfo(struct library *lib);
 int fileSize(int fd, off_t *size);
 
 int shouldIgnoreSymbol(Elf32_Sym *sym);
+
+int fixPermissions(struct library *lib);
+
+void align(struct library *lib, Elf32_Phdr *phdr, Elf32_Addr *minAligned,
+		   Elf32_Off *memSzAligned, Elf32_Off *fileOffset);

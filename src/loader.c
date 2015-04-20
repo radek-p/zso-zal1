@@ -30,6 +30,9 @@ struct library *library_load(const char *name, void *(*getsym)(char const *)) {
 	res = doRelocations(lib);
 	WHEN(res != 0, _UnmapSegments_, "failed to perform relocations");
 
+	res = fixPermissions(lib);
+	WHEN(res != 0, _UnmapSegments_, "failed to fix segment permissions");
+
 	LOGS("Done");
 
 	return lib; // Success
@@ -71,8 +74,7 @@ void *library_getsym(struct library *lib, const char *name) {
 	return NULL;
 }
 
-void *libraryGetSymAll(struct library *lib, const char *name)
-{
+void *libraryGetSymAll(struct library *lib, const char *name) {
 	void *sym = library_getsym(lib, name);
 	if (sym != NULL)
 		return sym;
@@ -94,8 +96,7 @@ struct library *initLibStruct(void *(*getsym)(char const *)) {
 		return NULL;
 }
 
-int loadElfFile(struct library *lib, int fd)
-{
+int loadElfFile(struct library *lib, int fd) {
 	LOGS("Mapping elf file to memory");
 
 	off_t size;
@@ -128,8 +129,7 @@ int loadElfFile(struct library *lib, int fd)
 		return 1;
 }
 
-int checkElfHeader(struct library *lib)
-{
+int checkElfHeader(struct library *lib) {
 	WHEN(lib->uFileSize < (sizeof(Elf32_Ehdr)), _Fail_, "file too small for elf header");
 
 	for (int i = 0; i < SELFMAG; ++i)
@@ -149,8 +149,7 @@ int checkElfHeader(struct library *lib)
 	return 1;
 }
 
-int mapSegments(struct library *lib, FILE *file)
-{
+int mapSegments(struct library *lib, FILE *file) {
 	LOGS("Mapping segments");
 
 	int res = prepareMapInfo(lib);
@@ -161,26 +160,22 @@ int mapSegments(struct library *lib, FILE *file)
 
 	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
 
-		if (lib->pPhdrs[i].p_type != PT_LOAD)
-			continue;
-
 		Elf32_Phdr *phdr = &lib->pPhdrs[i];
 
-		Elf32_Off  adjustment   = phdr->p_vaddr % lib->uPageSize;
-		Elf32_Addr minAligned   = phdr->p_vaddr  - adjustment;
-		Elf32_Off  memSzAligned = phdr->p_memsz  + adjustment;
-		Elf32_Off  fileOffset   = phdr->p_offset - adjustment;
-		memSzAligned = ((memSzAligned - 1) / lib->uPageSize + 1) * lib->uPageSize;
+		if (phdr->p_type != PT_LOAD)
+			continue;
 
-		LOGM("mmap fixed: addr: %p", (void *) (lib->pSMap + minAligned));
-		LOGM("mmap fixed: begin: %x, size: %x, foffset: %x", minAligned, memSzAligned, fileOffset);
+		Elf32_Addr minAligned; Elf32_Off memSzAligned; Elf32_Off fileOffset;
+		align(lib, phdr, &minAligned, &memSzAligned, &fileOffset);
 
-		int protectionLevel = 0;
-		if (phdr->p_flags & PF_X) protectionLevel |= PROT_EXEC;
-		/*if (phdr->p_flags & PF_W)*/ protectionLevel |= PROT_WRITE; // TODO
-		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
-
-		void * res2 = mmap(lib->pSMap + minAligned, memSzAligned, protectionLevel, MAP_FIXED | MAP_PRIVATE, fileno(file), fileOffset);
+		void *res2 = mmap(
+				lib->pSMap + minAligned,
+				memSzAligned,
+				PROT_READ | PROT_WRITE,
+				MAP_FIXED | MAP_PRIVATE,
+				fileno(file),
+				(off_t) fileOffset
+		);
 		WHEN(res2 == MAP_FAILED, _UnmapSegments_, "mmap fixed failed");
 
 		if (phdr->p_memsz > phdr->p_filesz) {
@@ -202,8 +197,7 @@ int mapSegments(struct library *lib, FILE *file)
 		return 1;
 }
 
-int prepareMapInfo(struct library *lib)
-{
+int prepareMapInfo(struct library *lib) {
 	WHEN(lib->pEhdr->e_phnum < 1, _Fail_, "file does not contain program header table");
 
 	Elf32_Addr maxVA = lib->pPhdrs[0].p_vaddr + lib->pPhdrs[0].p_memsz;
@@ -237,8 +231,7 @@ int prepareMapInfo(struct library *lib)
 		return 1;
 }
 
-int doRelocations(struct library *lib)
-{
+int doRelocations(struct library *lib) {
 
 	int res = prepareDynamicInfo(lib);
 	WHEN(res != 0, _Fail_, "failed to garther info from PT_DYNAMIC");
@@ -266,8 +259,7 @@ int doRelocations(struct library *lib)
 		return 1;
 }
 
-int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length)
-{
+int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length) {
 	for (Elf32_Half i = 0; i < length; ++i) {
 
 		Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(table[i].r_info)]; // TODO CHeck?
@@ -285,8 +277,7 @@ int doRelocationsFrom(struct library *lib, Elf32_Rel *table, size_t length)
 		return 1;
 }
 
-int prepareDynamicInfo(struct library *lib)
-{
+int prepareDynamicInfo(struct library *lib) {
 	LOGS("Finding dynamic info");
 	// Find PT_DYNAMIC segment, fail if the number of that segments is not 1.
 	lib->pDyn = NULL;
@@ -341,8 +332,7 @@ int prepareDynamicInfo(struct library *lib)
 		return 1;
 }
 
-int relocate(struct library *lib, Elf32_Rel *rel)
-{
+int relocate(struct library *lib, Elf32_Rel *rel) {
 	Elf32_Sym *sym = &lib->dtSymTab[ELF32_R_SYM(rel->r_info)]; // TODO CHeck?
 	char *name = lib->dtStrTab + sym->st_name;
 
@@ -358,7 +348,7 @@ int relocate(struct library *lib, Elf32_Rel *rel)
 			LOG("NOT LAZY JUMP SLOT");
 
 
-
+// TODO!
 //			break;
 
 		case R_386_GLOB_DAT:
@@ -421,8 +411,6 @@ void *lazyResolve(struct library *lib, Elf32_Addr relOffset) {
 	return NULL;
 }
 
-/* Oblicza rozmiar pliku.
- * Przy braku błędów zwraca 0. */
 int fileSize(int fd, off_t *size) {
 
 	struct stat st;
@@ -459,4 +447,41 @@ int shouldIgnoreSymbol(Elf32_Sym *sym) {
 	}
 
 	return 0;
+}
+
+int fixPermissions(struct library *lib) {
+	for (Elf32_Half i = 0; i < lib->pEhdr->e_phnum; ++i) {
+
+		Elf32_Phdr *phdr = &lib->pPhdrs[i];
+
+		if (phdr->p_type != PT_LOAD)
+			continue;
+
+		Elf32_Addr minAligned; Elf32_Off memSzAligned; Elf32_Off fileOffset;
+		align(lib, phdr, &minAligned, &memSzAligned, &fileOffset);
+
+		int protectionLevel = 0;
+		if (phdr->p_flags & PF_X) protectionLevel |= PROT_EXEC;
+		if (phdr->p_flags & PF_W) protectionLevel |= PROT_WRITE;
+		if (phdr->p_flags & PF_R) protectionLevel |= PROT_READ;
+
+		int res = mprotect(lib->pSMap + minAligned, memSzAligned, protectionLevel);
+		WHEN(res != 0, _Fail_, "failed to change segment protection level");
+	}
+	return 0;
+
+	_Fail_:
+		return 1;
+}
+
+void align(struct library *lib, Elf32_Phdr *phdr, Elf32_Addr *minAligned, Elf32_Off *memSzAligned,
+		   Elf32_Off *fileOffset) {
+	Elf32_Off adjustment = phdr->p_vaddr % lib->uPageSize;
+	*minAligned   = phdr->p_vaddr  - adjustment;
+	*memSzAligned = phdr->p_memsz  + adjustment;
+	*fileOffset   = phdr->p_offset - adjustment;
+	*memSzAligned = ((*memSzAligned - 1) / lib->uPageSize + 1) * lib->uPageSize;
+
+	LOGM("base addr: %p", (void *) (lib->pSMap + *minAligned));
+	LOGM("after align: begin: %x, size: %x, file offset: %x", *minAligned, *memSzAligned, *fileOffset);
 }
