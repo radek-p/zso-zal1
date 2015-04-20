@@ -1,5 +1,5 @@
 TESTS = addsub hello var ptr lazy textrel regparm
-all: $(addprefix test,$(TESTS)) libloader.so
+all: $(addprefix test,$(TESTS))
 COMMON_C_FLAGS = -g
 .PRECIOUS: %.so
 
@@ -12,7 +12,7 @@ textrel.so: textrel.c hello.h
 test%: test%.c %.so
 	gcc $(COMMON_C_FLAGS) -m32 -o $@ $< libloader.so -Wl,-rpath,.
 
-test: all $(addprefix call-,$(TESTS))
+test: libloader.so all $(addprefix call-,$(TESTS))
 
 call-%:
 	-./test$*
