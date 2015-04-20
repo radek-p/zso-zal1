@@ -20,13 +20,13 @@ set_property(SOURCE lazy-resolve.s PROPERTY LANGUAGE C)
 # target libloader.so:
 add_library(loader SHARED ${LIB_SRC})
 
-#set(TEST_SRC
-#    ../test/run_test.c
-#    ${LIB_SRC}
-#)
+set(TEST_SRC
+    test/run_test.c
+    ${LIB_SRC}
+)
 
-#add_executable(run_test ${TEST_SRC})
-#target_include_directories(run_test PUBLIC src)
+add_executable(run_test ${TEST_SRC})
+#include_directories(run_test PUBLIC .)
 
 
 # The testtextrel test and other tests can

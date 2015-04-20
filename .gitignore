@@ -1,1 +1,9 @@
 build/
+*.so
+tests/testaddsub
+tests/testhello
+tests/testlazy
+tests/testptr
+tests/testregparm
+tests/testtextrel
+tests/testvar

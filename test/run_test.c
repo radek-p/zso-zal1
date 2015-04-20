@@ -1,8 +1,9 @@
-#include "loader.h"
-#include "loader_private.h"
+#include "../loader.h"
+#include "../loader_private.h"
 
 #include <assert.h>
 #include <elf.h>
+#include <stdio.h>
 
 int test_align() {
 	struct library lib = { .uPageSize = 0x1000 };
@@ -23,6 +24,7 @@ int test_align() {
 int main() {
 
 	test_align();
+	printf("[OK] align test\n");
 
 	return 0;
 }
